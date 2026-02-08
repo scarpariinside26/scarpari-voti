@@ -1,0 +1,2063 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Scarpari Evo - Voti</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, getDocs, doc, setDoc, updateDoc, query, orderBy, limit, increment, getDoc, where, deleteDoc, writeBatch } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDjpa153B8IJvVTQYvtZwGiPSqpCe7jiQ4",
+            authDomain: "scarpari-inside-evo.firebaseapp.com",
+            projectId: "scarpari-inside-evo",
+            storageBucket: "scarpari-inside-evo.firebasestorage.app",
+            messagingSenderId: "446358185465",
+            appId: "1:446358185465:web:02e7842940299e43368928"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let utenteCorrente = null;
+        let ultimaPartita = null;
+        let mvpPerSquadra = {}; 
+        let votiInSessione = {};
+        let isAdmin = false;
+        const ADMIN_PASSWORD = "scarpari2024";
+        let bonusCommunityAccumulato = 0;
+        let votiSalvati = false;
+
+        // 🔥 PALETTE COLORI VIVIDI PER SQUADRE
+        const PALETTE = {
+            'GIALLO': { 
+                dot: 'bg-yellow-400', 
+                card: 'bg-yellow-100', 
+                border: 'border-yellow-300',
+                text: 'text-yellow-800',
+                dark: 'bg-yellow-500',
+                nome: '🟡 GIALLO'
+            },
+            'BLU': { 
+                dot: 'bg-blue-600', 
+                card: 'bg-blue-100', 
+                border: 'border-blue-300',
+                text: 'text-blue-800',
+                dark: 'bg-blue-700',
+                nome: '🔵 BLU'
+            },
+            'BIANCO': { 
+                dot: 'bg-gray-300', 
+                card: 'bg-gray-100', 
+                border: 'border-gray-300',
+                text: 'text-gray-800',
+                dark: 'bg-gray-400',
+                nome: '⚪ BIANCO'
+            },
+            'ROSSO': { 
+                dot: 'bg-red-600', 
+                card: 'bg-red-100', 
+                border: 'border-red-300',
+                text: 'text-red-800',
+                dark: 'bg-red-700',
+                nome: '🔴 ROSSO'
+            },
+            'NERO': { 
+                dot: 'bg-gray-900', 
+                card: 'bg-gray-200', 
+                border: 'border-gray-400',
+                text: 'text-gray-900',
+                dark: 'bg-gray-800',
+                nome: '⚫ NERO'
+            },
+            'ROSA': { 
+                dot: 'bg-pink-500', 
+                card: 'bg-pink-100', 
+                border: 'border-pink-300',
+                text: 'text-pink-800',
+                dark: 'bg-pink-600',
+                nome: '🌸 ROSA'
+            },
+            'VERDE': { 
+                dot: 'bg-emerald-500', 
+                card: 'bg-emerald-100', 
+                border: 'border-emerald-300',
+                text: 'text-emerald-800',
+                dark: 'bg-emerald-600',
+                nome: '🟢 VERDE'
+            },
+            'ARANCIO': { 
+                dot: 'bg-orange-500', 
+                card: 'bg-orange-100', 
+                border: 'border-orange-300',
+                text: 'text-orange-800',
+                dark: 'bg-orange-600',
+                nome: '🟠 ARANCIO'
+            },
+            'VIOLA': { 
+                dot: 'bg-purple-600', 
+                card: 'bg-purple-100', 
+                border: 'border-purple-300',
+                text: 'text-purple-800',
+                dark: 'bg-purple-700',
+                nome: '🟣 VIOLA'
+            },
+            'CELESTE': { 
+                dot: 'bg-cyan-500', 
+                card: 'bg-cyan-100', 
+                border: 'border-cyan-300',
+                text: 'text-cyan-800',
+                dark: 'bg-cyan-600',
+                nome: '💠 CELESTE'
+            }
+        };
+
+        // 🔥 FUNZIONE PER OTTENERE COLORE DELLA SQUADRA (CORRETTA)
+        function getColoreSquadra(nomeSquadra) {
+            // Controlla se nomeSquadra è valido
+            if (!nomeSquadra || typeof nomeSquadra !== 'string') {
+                console.warn("Nome squadra non valido:", nomeSquadra);
+                return PALETTE.BLU; // Default
+            }
+            
+            const nomeUpper = nomeSquadra.toUpperCase();
+            
+            if (nomeUpper.includes('GIALLO') || nomeUpper.includes('GIALLA')) return PALETTE.GIALLO;
+            if (nomeUpper.includes('BLU')) return PALETTE.BLU;
+            if (nomeUpper.includes('BIANCO') || nomeUpper.includes('BIANCA')) return PALETTE.BIANCO;
+            if (nomeUpper.includes('ROSSO') || nomeUpper.includes('ROSSA')) return PALETTE.ROSSO;
+            if (nomeUpper.includes('NERO') || nomeUpper.includes('NERA')) return PALETTE.NERO;
+            if (nomeUpper.includes('ROSA')) return PALETTE.ROSA;
+            if (nomeUpper.includes('VERDE')) return PALETTE.VERDE;
+            if (nomeUpper.includes('ARANCIO') || nomeUpper.includes('ARANCIONE')) return PALETTE.ARANCIO;
+            if (nomeUpper.includes('VIOLA')) return PALETTE.VIOLA;
+            if (nomeUpper.includes('CELESTE')) return PALETTE.CELESTE;
+            
+            const coloriDefault = [PALETTE.BLU, PALETTE.ROSSO, PALETTE.VERDE, PALETTE.GIALLO, PALETTE.VIOLA];
+            return coloriDefault[nomeSquadra.length % coloriDefault.length] || PALETTE.BLU;
+        }
+
+        function verificaPartecipazionePartita(nomeGiocatore) {
+            if (!ultimaPartita || !nomeGiocatore || !ultimaPartita.squadre) return false;
+            
+            for (const squadra of ultimaPartita.squadre) {
+                if (squadra && squadra.players) {
+                    for (const player of squadra.players) {
+                        if (player && player.nome && player.nome.toLowerCase() === nomeGiocatore.toLowerCase()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        async function haGiaVotato(nomeGiocatore) {
+            if (!ultimaPartita || !nomeGiocatore) return false;
+            
+            try {
+                const votiRef = collection(db, "voti_partita", ultimaPartita.id, "voti");
+                const q = query(votiRef, where("da", "==", nomeGiocatore));
+                const snapshot = await getDocs(q);
+                return !snapshot.empty;
+            } catch (error) {
+                console.error("Errore verifica voto:", error);
+                return false;
+            }
+        }
+
+        function verificaUtenteCorrente() {
+            try {
+                const savedUser = sessionStorage.getItem('votazioni_utente_corrente');
+                if (savedUser) {
+                    utenteCorrente = JSON.parse(savedUser);
+                    console.log("✅ Utente corrente:", utenteCorrente.nome);
+                    return true;
+                }
+                console.log("❌ Nessun utente in sessione");
+                return false;
+            } catch (error) {
+                console.error("Errore verifica utente:", error);
+                return false;
+            }
+        }
+
+        function verificaAdminLoggato() {
+            const adminLoggato = sessionStorage.getItem('scarpari_admin_logged');
+            if (adminLoggato === 'true') {
+                isAdmin = true;
+                console.log("🔓 Admin già loggato in questa sessione");
+            }
+        }
+
+        // 🔥 FUNZIONE PRINCIPALE INIZIALIZZATA
+        async function inizializza() {
+            console.log("=== INIZIALIZZAZIONE VOTAZIONI ===");
+            
+            try {
+                // Controlla se admin è già loggato
+                verificaAdminLoggato();
+                
+                // 1. Controlla se dobbiamo mostrare statistiche
+                const statsUser = sessionStorage.getItem('visualizza_statistiche');
+                if (statsUser) {
+                    console.log("📊 Modalità statistiche per:", statsUser);
+                    sessionStorage.removeItem('visualizza_statistiche');
+                    
+                    // Crea un utente temporaneo per le statistiche
+                    utenteCorrente = {
+                        nome: statsUser,
+                        id: statsUser.replace(/\s/g, '_').toLowerCase(),
+                        isOspite: false,
+                        email: ""
+                    };
+                    
+                    // Mostra le statistiche invece di reindirizzare al login
+                    await visualizzaStatistichePersonali();
+                    aggiornaUIUtente();
+                    return;
+                }
+                
+                // 2. Verifica utente normale
+                if (!verificaUtenteCorrente()) {
+                    console.log("Redirect a login...");
+                    window.location.href = "login_voti.html";
+                    return;
+                }
+                
+                console.log("👤 Utente confermato:", utenteCorrente.nome);
+                
+                // 3. Carica ultima partita
+                await caricaUltimaPartita();
+                if (!ultimaPartita) {
+                    mostraErrore("Nessuna partita trovata");
+                    return;
+                }
+                
+                // 4. Controlla se le votazioni sono scadute
+                const votazioniAperte = await verificaScadenzaVotazioni();
+                console.log("Votazioni aperte?", votazioniAperte);
+                
+                if (!votazioniAperte) {
+                    // Votazioni chiuse - forziamo l'aggiornamento statistiche
+                    const statsDoc = await getDoc(doc(db, "voti_partita_stats", ultimaPartita.id));
+                    if (!statsDoc.exists()) {
+                        // Se le votazioni sono chiuse ma non ci sono statistiche, le calcoliamo
+                        await chiudiVotazioniEAggiornaStatistiche();
+                    }
+                    
+                    document.getElementById('benvenutoArea').classList.add('hidden');
+                    document.getElementById('votazioneArea').classList.remove('hidden');
+                    mostraVotazioniChiuse();
+                    aggiornaUIUtente();
+                    return;
+                }
+                
+                // 5. Verifica se l'utente partecipa
+                const partecipa = verificaPartecipazionePartita(utenteCorrente.nome);
+                if (!partecipa) {
+                    console.log("Utente non partecipa alla partita");
+                    mostraSchermataNonPartecipante();
+                    aggiornaUIUtente();
+                    return;
+                }
+                
+                // 6. Verifica se ha già votato
+                const giaVotato = await haGiaVotato(utenteCorrente.nome);
+                console.log("Ha già votato?", giaVotato);
+                
+                if (giaVotato) {
+                    console.log("Utente ha già votato");
+                    mostraSchermataGiaVotato();
+                    aggiornaUIUtente();
+                    return;
+                }
+                
+                // 7. Mostra votazione normale
+                console.log("Mostra area votazione normale");
+                document.getElementById('benvenutoArea').classList.add('hidden');
+                document.getElementById('votazioneArea').classList.remove('hidden');
+                
+                votiInSessione = {};
+                mvpPerSquadra = {};
+                bonusCommunityAccumulato = 0;
+                votiSalvati = false;
+                await inizializzaVotazione();
+                aggiornaUIUtente();
+                
+            } catch (error) {
+                console.error("Errore inizializzazione:", error);
+                mostraErrore(`Errore di sistema: ${error.message}`);
+            }
+        }
+
+        async function caricaUltimaPartita() {
+            try {
+                const q = query(collection(db, "matches"), orderBy("dataArchiviazione", "desc"), limit(1));
+                const snap = await getDocs(q);
+                
+                if (snap.empty) {
+                    throw new Error("Nessuna partita trovata");
+                }
+                
+                ultimaPartita = { 
+                    id: snap.docs[0].id, 
+                    ...snap.docs[0].data() 
+                };
+                console.log("⚽ Partita caricata:", ultimaPartita.id, "-", ultimaPartita.info?.riga1);
+                console.log("Squadre:", ultimaPartita.squadre);
+                
+            } catch (error) {
+                console.error("Errore caricamento partita:", error);
+                mostraErrore("Impossibile caricare la partita");
+            }
+        }
+
+        // 🔥 VERIFICA SCADENZA CORRETTA CON TIMER 48 ORE
+        async function verificaScadenzaVotazioni() {
+            try {
+                // Controlla se le votazioni sono già state chiuse
+                const statsDoc = await getDoc(doc(db, "voti_partita_stats", ultimaPartita.id));
+                if (statsDoc.exists()) {
+                    console.log("Votazioni già chiuse manualmente");
+                    return false;
+                }
+                
+                // Calcola quando è finita la partita
+                const dataPartita = ultimaPartita.info?.riga2 || "";
+                let dataFinePartita = null;
+                
+                // Parsing migliore della data
+                const dateMatch = dataPartita.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                if (dateMatch) {
+                    const [_, giorno, mese, anno] = dateMatch;
+                    // Se la partita è finita alle 21:30, aggiungiamo 2 ore per sicurezza
+                    if (dataPartita.includes("21:30") || dataPartita.includes("21.30")) {
+                        dataFinePartita = new Date(anno, mese - 1, giorno, 23, 30, 0);
+                    } else {
+                        dataFinePartita = new Date(anno, mese - 1, giorno, 22, 0, 0);
+                    }
+                } else {
+                    // Fallback: usa la data di archiviazione
+                    dataFinePartita = new Date(ultimaPartita.dataArchiviazione);
+                    dataFinePartita.setHours(dataFinePartita.getHours() + 2);
+                }
+                
+                // Aggiungi 48 ore per la scadenza votazioni
+                const scadenzaVotazioni = new Date(dataFinePartita.getTime() + (48 * 60 * 60 * 1000));
+                const oraAttuale = new Date();
+                
+                console.log("Data fine partita:", dataFinePartita);
+                console.log("Scadenza votazioni:", scadenzaVotazioni);
+                console.log("Ora attuale:", oraAttuale);
+                console.log("Votazioni aperte?", oraAttuale <= scadenzaVotazioni);
+                
+                // Se è passato più di 48 ore dalla fine partita, chiudi votazioni
+                if (oraAttuale > scadenzaVotazioni) {
+                    console.log("Votazioni scadute, chiudo automaticamente");
+                    await chiudiVotazioniEAggiornaStatistiche();
+                    return false;
+                }
+                
+                return true;
+                
+            } catch (error) {
+                console.error("Errore verifica scadenza:", error);
+                // In caso di errore, lascia aperte le votazioni per sicurezza
+                return true;
+            }
+        }
+
+        // 🔥 FUNZIONE PER CHIUDERE VOTAZIONI E AGGIORNARE STATISTICHE
+        async function chiudiVotazioniEAggiornaStatistiche() {
+            try {
+                console.log("🔒 Chiusura votazioni e aggiornamento statistiche...");
+                
+                // 1. Raccogli tutti i voti della partita
+                const votiRef = collection(db, "voti_partita", ultimaPartita.id, "voti");
+                const votiSnapshot = await getDocs(votiRef);
+                
+                if (votiSnapshot.empty) {
+                    console.log("Nessun voto per questa partita");
+                    return;
+                }
+                
+                // 2. Calcola statistiche per ogni giocatore
+                const votiPerGiocatore = {};
+                const votantiSet = new Set();
+                
+                votiSnapshot.forEach(doc => {
+                    const voto = doc.data();
+                    votantiSet.add(voto.da);
+                    
+                    if (!votiPerGiocatore[voto.per]) {
+                        votiPerGiocatore[voto.per] = {
+                            voti: [],
+                            somma: 0,
+                            mvp: 0
+                        };
+                    }
+                    
+                    votiPerGiocatore[voto.per].voti.push(voto.voto);
+                    votiPerGiocatore[voto.per].somma += voto.voto;
+                    if (voto.mvp) votiPerGiocatore[voto.per].mvp++;
+                });
+                
+                // 3. Calcola medie e aggiorna statistiche
+                const batch = writeBatch(db);
+                
+                for (const [nomeGiocatore, dati] of Object.entries(votiPerGiocatore)) {
+                    const mediaPartita = dati.somma / dati.voti.length;
+                    
+                    // Trova il documento del giocatore
+                    const giocatoreId = nomeGiocatore.replace(/\s/g, '_').toLowerCase();
+                    const giocatoreRef = doc(db, "registry", giocatoreId);
+                    const giocatoreDoc = await getDoc(giocatoreRef);
+                    
+                    if (giocatoreDoc.exists()) {
+                        const datiAttuali = giocatoreDoc.data();
+                        const storicoVoti = datiAttuali.storicoVoti || [];
+                        
+                        // Aggiungi voto alla cronologia
+                        storicoVoti.push({
+                            partita: ultimaPartita.id,
+                            data: new Date().toISOString(),
+                            media: parseFloat(mediaPartita.toFixed(2)),
+                            mvp: dati.mvp
+                        });
+                        
+                        // Calcola nuovo voto base (media ponderata)
+                        const partiteGiocate = (datiAttuali.partiteGiocate || 0) + 1;
+                        let nuovoVotoBase = 7.0; // Default
+                        
+                        if (partiteGiocate > 0) {
+                            // Media ponderata: 70% voto base precedente, 30% nuova media
+                            const votoPrecedente = datiAttuali.votoBase || 7.0;
+                            nuovoVotoBase = (votoPrecedente * 0.7) + (mediaPartita * 0.3);
+                        }
+                        
+                        // Aggiorna dati giocatore
+                        batch.update(giocatoreRef, {
+                            votoBase: parseFloat(nuovoVotoBase.toFixed(2)),
+                            partiteGiocate: partiteGiocate,
+                            mvpTotali: (datiAttuali.mvpTotali || 0) + dati.mvp,
+                            storicoVoti: storicoVoti.slice(-20), // Mantieni solo ultime 20 partite
+                            ultimoVoto: parseFloat(mediaPartita.toFixed(2)),
+                            dataUltimoVoto: new Date().toISOString(),
+                            ultimaPartitaGiocata: ultimaPartita.id
+                        });
+                    }
+                }
+                
+                await batch.commit();
+                
+                // 4. Salva statistiche della partita
+                const giocatoriStats = {};
+                for (const [nomeGiocatore, dati] of Object.entries(votiPerGiocatore)) {
+                    giocatoriStats[nomeGiocatore] = {
+                        media: parseFloat((dati.somma / dati.voti.length).toFixed(2)),
+                        votiRicevuti: dati.voti.length,
+                        mvp: dati.mvp
+                    };
+                }
+                
+                await setDoc(doc(db, "voti_partita_stats", ultimaPartita.id), {
+                    partita: ultimaPartita.id,
+                    nomePartita: ultimaPartita.info?.riga1 || "Partita",
+                    dataPartita: ultimaPartita.info?.riga2 || new Date().toLocaleDateString('it-IT'),
+                    timestampChiusura: new Date().toISOString(),
+                    votantiTotali: votantiSet.size,
+                    giocatoriTotali: Object.keys(votiPerGiocatore).length,
+                    percentualeVotanti: 100, // Votazioni chiuse
+                    chiusuraAutomatica: true,
+                    giocatori: giocatoriStats,
+                    statisticheCalcolate: true
+                });
+                
+                console.log("✅ Statistiche aggiornate e votazioni chiuse");
+                
+            } catch (error) {
+                console.error("Errore chiusura e aggiornamento:", error);
+                throw error;
+            }
+        }
+
+        // 🔥 BARRA PROGRESSO VOTI VISIBILE A TUTTI
+        async function caricaProgressoVotazioni() {
+            try {
+                // Conta partecipanti totali
+                let partecipantiTotali = 0;
+                if (ultimaPartita && ultimaPartita.squadre) {
+                    ultimaPartita.squadre.forEach(squadra => {
+                        if (squadra && squadra.players) {
+                            partecipantiTotali += squadra.players.length;
+                        }
+                    });
+                }
+                
+                // Conta votanti (senza registrare nomi)
+                const votiSnapshot = await getDocs(collection(db, "voti_partita", ultimaPartita.id, "voti"));
+                const votantiSet = new Set();
+                votiSnapshot.forEach(doc => {
+                    votantiSet.add(doc.data().da);
+                });
+                const votanti = votantiSet.size;
+                
+                // Calcola percentuale
+                const percentualeVotanti = partecipantiTotali > 0 ? Math.round((votanti / partecipantiTotali) * 100) : 0;
+                
+                return {
+                    partecipantiTotali,
+                    votanti,
+                    percentualeVotanti,
+                    daVotare: partecipantiTotali - votanti
+                };
+                
+            } catch (error) {
+                console.error("Errore caricamento progresso:", error);
+                return {
+                    partecipantiTotali: 0,
+                    votanti: 0,
+                    percentualeVotanti: 0,
+                    daVotare: 0
+                };
+            }
+        }
+
+        function renderBarraProgresso() {
+            const container = document.getElementById('barraProgresso');
+            if (!container) return;
+            
+            caricaProgressoVotazioni().then(stats => {
+                container.innerHTML = `
+                    <div class="bg-white rounded-xl p-3 shadow border mb-3">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="font-black text-[10px] uppercase text-slate-700">
+                                📊 STATO VOTAZIONI
+                            </h4>
+                            <span class="text-[9px] font-black text-blue-600">
+                                ${stats.votanti}/${stats.partecipantiTotali} votanti
+                            </span>
+                        </div>
+                        
+                        <div class="w-full bg-slate-200 rounded-full h-2 mb-2">
+                            <div class="h-2 rounded-full bg-blue-600" 
+                                 style="width: ${stats.percentualeVotanti}%"></div>
+                        </div>
+                        
+                        <div class="text-[8px] text-slate-500 flex justify-between">
+                            <span>${stats.percentualeVotanti}% completato</span>
+                            <span>${stats.daVotare} da votare</span>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        // 🔥 FUNZIONE PER VISUALIZZARE RIEPILOGO VOTI (CORRETTA)
+        async function mostraRiepilogoVoti() {
+            try {
+                // Carica i voti dell'utente corrente per questa partita
+                const votiRef = collection(db, "voti_partita", ultimaPartita.id, "voti");
+                const q = query(votiRef, where("da", "==", utenteCorrente.nome));
+                const snapshot = await getDocs(q);
+                
+                if (snapshot.empty) {
+                    mostraNotifica("Nessun voto trovato", "error");
+                    return;
+                }
+                
+                const voti = [];
+                snapshot.forEach(doc => {
+                    voti.push(doc.data());
+                });
+                
+                // Raggruppa per squadra
+                const votiPerSquadra = {};
+                
+                voti.forEach(voto => {
+                    const squadraIndex = voto.squadra;
+                    if (!votiPerSquadra[squadraIndex]) {
+                        votiPerSquadra[squadraIndex] = [];
+                    }
+                    votiPerSquadra[squadraIndex].push(voto);
+                });
+                
+                // Crea HTML del riepilogo
+                let html = `
+                    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                            <div class="flex justify-between items-center mb-6">
+                                <h4 class="font-black text-xl uppercase">📋 Riepilogo Voti</h4>
+                                <button onclick="chiudiRiepilogo()" 
+                                        class="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+                            </div>
+                            
+                            <div class="text-center mb-4">
+                                <p class="text-sm font-bold text-slate-800">${utenteCorrente.nome}</p>
+                                <p class="text-xs text-slate-600">${ultimaPartita.info?.riga1 || "Partita"}</p>
+                                <p class="text-xs text-slate-500">${ultimaPartita.info?.riga2 || ""}</p>
+                            </div>
+                `;
+                
+                // Per ogni squadra
+                Object.entries(votiPerSquadra).forEach(([squadraIndex, votiSquadra]) => {
+                    // Verifica che la squadra esista
+                    const squadra = ultimaPartita.squadre && ultimaPartita.squadre[squadraIndex];
+                    if (!squadra) {
+                        console.warn(`Squadra ${squadraIndex} non trovata nella partita`);
+                        return;
+                    }
+                    
+                    const colore = getColoreSquadra(squadra.nome || `Squadra ${squadraIndex}`);
+                    
+                    html += `
+                        <div class="mb-6">
+                            <div class="flex items-center gap-2 mb-3">
+                                <div class="${colore.dot} w-4 h-4 rounded-full"></div>
+                                <h3 class="font-bold text-sm ${colore.text}">${squadra.nome || `Squadra ${squadraIndex}`}</h3>
+                            </div>
+                            <div class="space-y-2">
+                    `;
+                    
+                    votiSquadra.forEach(voto => {
+                        html += `
+                            <div class="flex justify-between items-center border-b pb-2">
+                                <div>
+                                    <span class="font-bold text-slate-800">${voto.per}</span>
+                                    ${voto.mvp ? '<span class="text-xs text-yellow-600 ml-2">⭐ MVP</span>' : ''}
+                                </div>
+                                <div class="text-right">
+                                    <span class="font-black text-blue-600">${voto.voto}</span>
+                                    <span class="text-[10px] text-slate-500 ml-1">/10</span>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        <div class="mt-6 pt-4 border-t">
+                            <p class="text-[10px] text-slate-500 text-center mb-4">
+                                Hai espresso ${voti.length} voti totali
+                            </p>
+                            <div class="flex gap-2">
+                                <button onclick="chiudiRiepilogo()" 
+                                        class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 rounded-xl text-[11px] uppercase">
+                                    Chiudi
+                                </button>
+                                <button onclick="visualizzaStatistichePersonali()" 
+                                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-[11px] uppercase">
+                                    📊 Statistiche
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                `;
+                
+                // Mostra modale
+                const modal = document.createElement('div');
+                modal.id = 'modalRiepilogo';
+                modal.innerHTML = html;
+                document.body.appendChild(modal);
+                
+            } catch (error) {
+                console.error("Errore caricamento riepilogo:", error);
+                mostraNotifica("Errore nel caricamento del riepilogo", "error");
+            }
+        }
+
+        window.chiudiRiepilogo = function() {
+            const modal = document.getElementById('modalRiepilogo');
+            if (modal) modal.remove();
+        };
+
+        // 🔥 DASHBOARD ADMIN PROTETTA DA PASSWORD
+        window.mostraDashboardAdmin = async () => {
+            console.log("🔐 Accesso dashboard admin...");
+            
+            // Controlla se è già autenticato
+            if (isAdmin) {
+                await mostraDashboardAdminCompleta();
+                return;
+            }
+            
+            // Mostra modal per inserire password
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="font-black text-lg uppercase">🔐 Accesso Admin</h4>
+                        <button onclick="this.parentElement.parentElement.remove()" 
+                                class="text-slate-400 hover:text-slate-600">✕</button>
+                    </div>
+                    
+                    <p class="text-[10px] text-slate-600 mb-4">
+                        Inserisci la password per accedere al pannello di amministrazione
+                    </p>
+                    
+                    <input type="password" id="adminPassword" placeholder="Password" 
+                           class="w-full p-3 border rounded-lg mb-4 font-bold text-center" autocomplete="off">
+                    
+                    <div class="flex gap-2">
+                        <button onclick="verificaPasswordAdmin()" 
+                                class="flex-1 bg-blue-600 text-white font-black py-3 rounded-lg text-[10px] uppercase hover:bg-blue-700">
+                            Accedi
+                        </button>
+                        <button onclick="this.parentElement.parentElement.remove()" 
+                                class="flex-1 bg-slate-200 text-slate-700 font-black py-3 rounded-lg text-[10px] uppercase hover:bg-slate-300">
+                            Annulla
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.body.appendChild(modal);
+            document.getElementById('adminPassword').focus();
+        };
+
+        window.verificaPasswordAdmin = async () => {
+            const passwordInput = document.getElementById('adminPassword');
+            if (!passwordInput) return;
+            
+            const password = passwordInput.value;
+            const modal = passwordInput.closest('.fixed.inset-0');
+            
+            if (password === ADMIN_PASSWORD) {
+                isAdmin = true;
+                // Salva lo stato di admin in sessionStorage
+                sessionStorage.setItem('scarpari_admin_logged', 'true');
+                if (modal) modal.remove();
+                await mostraDashboardAdminCompleta();
+            } else {
+                mostraNotifica("❌ Password errata", 'error');
+                passwordInput.value = '';
+                passwordInput.focus();
+            }
+        };
+
+        // 🔥 DASHBOARD ADMIN COMPLETA CON BACKUP
+        async function mostraDashboardAdminCompleta() {
+            try {
+                // Carica tutte le partite con voti
+                const partiteConVoti = await caricaTuttePartiteConVoti();
+                
+                const html = `
+                    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                            <div class="flex justify-between items-center mb-6">
+                                <h4 class="font-black text-xl uppercase">👑 Dashboard Admin Completa</h4>
+                                <button onclick="chiudiModalAdmin()" 
+                                        class="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+                            </div>
+                            
+                            <!-- Statistiche Generali -->
+                            <div class="grid grid-cols-4 gap-4 mb-6">
+                                <div class="bg-blue-50 p-4 rounded-xl text-center">
+                                    <div class="text-xs font-bold text-blue-700 uppercase">Partite Totali</div>
+                                    <div class="text-2xl font-black text-blue-900">${partiteConVoti.length}</div>
+                                    <div class="text-xs text-blue-600">con voti registrati</div>
+                                </div>
+                                <div class="bg-emerald-50 p-4 rounded-xl text-center">
+                                    <div class="text-xs font-bold text-emerald-700 uppercase">Voti Totali</div>
+                                    <div class="text-2xl font-black text-emerald-900">${await contaVotiTotali()}</div>
+                                    <div class="text-xs text-emerald-600">voti registrati</div>
+                                </div>
+                                <div class="bg-purple-50 p-4 rounded-xl text-center">
+                                    <div class="text-xs font-bold text-purple-700 uppercase">Ultima Partita</div>
+                                    <div class="text-lg font-black text-purple-900">${ultimaPartita?.info?.riga1 || 'Nessuna'}</div>
+                                    <div class="text-xs text-purple-600">${ultimaPartita?.info?.riga2 || ''}</div>
+                                </div>
+                                <div class="bg-amber-50 p-4 rounded-xl text-center">
+                                    <div class="text-xs font-bold text-amber-700 uppercase">Backup</div>
+                                    <div class="text-2xl font-black text-amber-900">⚠️</div>
+                                    <div class="text-xs text-amber-600">Esporta dati</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Pulsanti Backup -->
+                            <div class="mb-6">
+                                <h5 class="font-black text-[14px] uppercase text-slate-700 mb-4 border-b pb-2">
+                                    💾 BACKUP DATI
+                                </h5>
+                                <div class="grid grid-cols-2 gap-3">
+                                    <button onclick="esportaBackupJSON()" 
+                                            class="bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-sm uppercase transition-colors">
+                                        📥 Esporta JSON
+                                    </button>
+                                    <button onclick="esportaBackupCSV()" 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-sm uppercase transition-colors">
+                                        📊 Esporta CSV
+                                    </button>
+                                </div>
+                                <p class="text-[10px] text-slate-500 mt-2 text-center">
+                                    Salva i dati localmente per sicurezza
+                                </p>
+                            </div>
+                            
+                            <!-- Elenco Partite -->
+                            <div class="mb-6">
+                                <h5 class="font-black text-[14px] uppercase text-slate-700 mb-4 border-b pb-2">
+                                    📋 Elenco Partite con Voti Registrati
+                                </h5>
+                                
+                                ${partiteConVoti.length > 0 ? `
+                                <div class="space-y-3 max-h-80 overflow-y-auto pr-2">
+                                    ${partiteConVoti.map(partita => `
+                                        <div class="border rounded-xl p-4 hover:bg-slate-50 transition-colors">
+                                            <div class="flex justify-between items-start mb-2">
+                                                <div>
+                                                    <h6 class="font-black text-slate-800">${partita.nome}</h6>
+                                                    <p class="text-xs text-slate-600">${partita.data}</p>
+                                                    <div class="flex gap-2 mt-1">
+                                                        <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                                                            ID: ${partita.id}
+                                                        </span>
+                                                        <span class="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-1 rounded">
+                                                            Voti: ${partita.voti}
+                                                        </span>
+                                                        <span class="text-[10px] ${partita.chiusa ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'} px-2 py-1 rounded">
+                                                            ${partita.chiusa ? 'Chiusa' : 'Aperta'}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <div class="flex flex-col gap-2">
+                                                    <button onclick="visualizzaDettagliPartita('${partita.id}')" 
+                                                            class="text-[10px] bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700">
+                                                        📊 Dettagli
+                                                    </button>
+                                                    <button onclick="cancellaPartita('${partita.id}', '${partita.nome}')" 
+                                                            class="text-[10px] bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700">
+                                                        🗑️ Cancella
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                                ` : `
+                                <div class="text-center py-8 text-slate-400">
+                                    <p class="text-sm">Nessuna partita con voti registrati</p>
+                                </div>
+                                `}
+                            </div>
+                            
+                            <!-- Pulsanti Azione Massiva -->
+                            <div class="space-y-3">
+                                <button onclick="cancellaTuttePartite()" 
+                                        class="w-full bg-red-600 hover:bg-red-700 text-white font-black py-3 rounded-xl text-sm uppercase transition-colors">
+                                    🗑️ CANCELLA TUTTI I DATI VOTI
+                                </button>
+                                
+                                <button onclick="resettaStatisticheGiocatori()" 
+                                        class="w-full bg-orange-600 hover:bg-orange-700 text-white font-black py-3 rounded-xl text-sm uppercase transition-colors">
+                                    🔄 RESETTA STATISTICHE GIOCATORI
+                                </button>
+                                
+                                <button onclick="chiudiModalAdmin()" 
+                                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black py-3 rounded-xl text-sm uppercase transition-colors">
+                                    Chiudi Dashboard
+                                </button>
+                            </div>
+                            
+                            <!-- Avviso Importante -->
+                            <div class="mt-6 p-3 bg-red-50 border border-red-200 rounded-lg">
+                                <p class="text-xs text-red-700 font-bold">
+                                    ⚠️ ATTENZIONE: Le operazioni di cancellazione sono IRREVERSIBILI!
+                                </p>
+                                <p class="text-[10px] text-red-600 mt-1">
+                                    Assicurati di aver effettuato un backup prima di procedere.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Rimuovi eventuali modali esistenti
+                const existingModal = document.querySelector('.admin-completa-modal');
+                if (existingModal) existingModal.remove();
+                
+                // Aggiungi nuovo modale
+                const modalDiv = document.createElement('div');
+                modalDiv.className = 'admin-completa-modal';
+                modalDiv.innerHTML = html;
+                document.body.appendChild(modalDiv);
+                
+            } catch (error) {
+                console.error("Errore dashboard admin completa:", error);
+                mostraNotifica("Errore caricamento dashboard", "error");
+            }
+        }
+
+        // 🔥 FUNZIONI BACKUP
+        window.esportaBackupJSON = async () => {
+            try {
+                mostraNotifica("⏳ Preparazione backup JSON...", "info");
+                
+                // Raccogli tutti i dati delle partite con voti
+                const partiteConVoti = await caricaTuttePartiteConVotiCompleto();
+                
+                // Crea oggetto backup
+                const backupData = {
+                    timestamp: new Date().toISOString(),
+                    partite: partiteConVoti.length,
+                    votiTotali: await contaVotiTotali(),
+                    dati: partiteConVoti
+                };
+                
+                // Converti in JSON
+                const jsonData = JSON.stringify(backupData, null, 2);
+                
+                // Crea e scarica file
+                const blob = new Blob([jsonData], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `scarpari_backup_${new Date().toISOString().slice(0,10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                mostraNotifica("✅ Backup JSON esportato con successo!", "success");
+                
+            } catch (error) {
+                console.error("Errore esportazione JSON:", error);
+                mostraNotifica("❌ Errore esportazione backup", "error");
+            }
+        };
+
+        window.esportaBackupCSV = async () => {
+            try {
+                mostraNotifica("⏳ Preparazione backup CSV...", "info");
+                
+                // Raccogli tutti i voti
+                const partiteConVoti = await caricaTuttePartiteConVotiCompleto();
+                
+                // Crea header CSV
+                let csvContent = "DATA;PARTITA;VOTANTE;GIOCATORE;VOTO;MVP;TIMESTAMP\n";
+                
+                // Aggiungi dati
+                for (const partita of partiteConVoti) {
+                    for (const voto of partita.votiDettagliati) {
+                        csvContent += `${partita.data};"${partita.nome}";"${voto.da}";"${voto.per}";${voto.voto};${voto.mvp ? 'SI' : 'NO'};${voto.timestamp}\n`;
+                    }
+                }
+                
+                // Crea e scarica file
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `scarpari_backup_${new Date().toISOString().slice(0,10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                mostraNotifica("✅ Backup CSV esportato con successo!", "success");
+                
+            } catch (error) {
+                console.error("Errore esportazione CSV:", error);
+                mostraNotifica("❌ Errore esportazione backup", "error");
+            }
+        };
+
+        async function caricaTuttePartiteConVotiCompleto() {
+            try {
+                // Carica tutte le partite
+                const matchesSnapshot = await getDocs(query(collection(db, "matches"), orderBy("dataArchiviazione", "desc")));
+                const partiteConVoti = [];
+                
+                for (const docSnap of matchesSnapshot.docs) {
+                    const partita = { id: docSnap.id, ...docSnap.data() };
+                    
+                    // Carica voti della partita
+                    const votiRef = collection(db, "voti_partita", partita.id, "voti");
+                    const votiSnapshot = await getDocs(votiRef);
+                    const numVoti = votiSnapshot.size;
+                    
+                    if (numVoti > 0) {
+                        // Controlla se le votazioni sono chiuse
+                        const statsDoc = await getDoc(doc(db, "voti_partita_stats", partita.id));
+                        const chiusa = statsDoc.exists();
+                        
+                        // Raccogli dettagli voti
+                        const votiDettagliati = [];
+                        votiSnapshot.forEach(doc => {
+                            votiDettagliati.push(doc.data());
+                        });
+                        
+                        partiteConVoti.push({
+                            id: partita.id,
+                            nome: partita.info?.riga1 || `Partita ${partita.id}`,
+                            data: partita.info?.riga2 || partita.dataArchiviazione?.substring(0, 10) || "N/D",
+                            voti: numVoti,
+                            chiusa: chiusa,
+                            votiDettagliati: votiDettagliati,
+                            partitaCompleta: partita
+                        });
+                    }
+                }
+                
+                return partiteConVoti;
+                
+            } catch (error) {
+                console.error("Errore caricamento partite completo:", error);
+                return [];
+            }
+        }
+
+        // 🔥 FUNZIONI PER CARICAMENTO DATI
+        async function caricaTuttePartiteConVoti() {
+            try {
+                // Carica tutte le partite
+                const matchesSnapshot = await getDocs(query(collection(db, "matches"), orderBy("dataArchiviazione", "desc")));
+                const partiteConVoti = [];
+                
+                for (const docSnap of matchesSnapshot.docs) {
+                    const partita = { id: docSnap.id, ...docSnap.data() };
+                    
+                    // Controlla se ci sono voti per questa partita
+                    const votiRef = collection(db, "voti_partita", partita.id, "voti");
+                    const votiSnapshot = await getDocs(votiRef);
+                    const numVoti = votiSnapshot.size;
+                    
+                    if (numVoti > 0) {
+                        // Controlla se le votazioni sono chiuse
+                        const statsDoc = await getDoc(doc(db, "voti_partita_stats", partita.id));
+                        const chiusa = statsDoc.exists();
+                        
+                        partiteConVoti.push({
+                            id: partita.id,
+                            nome: partita.info?.riga1 || `Partita ${partita.id}`,
+                            data: partita.info?.riga2 || partita.dataArchiviazione?.substring(0, 10) || "N/D",
+                            voti: numVoti,
+                            chiusa: chiusa
+                        });
+                    }
+                }
+                
+                return partiteConVoti;
+                
+            } catch (error) {
+                console.error("Errore caricamento partite:", error);
+                return [];
+            }
+        }
+
+        async function contaVotiTotali() {
+            try {
+                let totaleVoti = 0;
+                const matchesSnapshot = await getDocs(collection(db, "matches"));
+                
+                for (const docSnap of matchesSnapshot.docs) {
+                    const votiRef = collection(db, "voti_partita", docSnap.id, "voti");
+                    const votiSnapshot = await getDocs(votiRef);
+                    totaleVoti += votiSnapshot.size;
+                }
+                
+                return totaleVoti;
+                
+            } catch (error) {
+                console.error("Errore conteggio voti:", error);
+                return 0;
+            }
+        }
+
+        // 🔥 FUNZIONI DI CANCELLAZIONE
+        window.cancellaPartita = async (partitaId, nomePartita) => {
+            if (!isAdmin) {
+                mostraNotifica("❌ Solo l'admin può cancellare partite", 'error');
+                return;
+            }
+            
+            const conferma = confirm(`ATTENZIONE!\n\nStai per cancellare TUTTI i voti della partita:\n"${nomePartita}"\n\nQuesta operazione è IRREVERSIBILE!\n\nVuoi procedere?`);
+            
+            if (!conferma) return;
+            
+            try {
+                // 1. Cancella tutti i voti della partita
+                const votiRef = collection(db, "voti_partita", partitaId, "voti");
+                const votiSnapshot = await getDocs(votiRef);
+                const batch = writeBatch(db);
+                
+                votiSnapshot.forEach((doc) => {
+                    batch.delete(doc.ref);
+                });
+                
+                await batch.commit();
+                
+                // 2. Cancella le statistiche della partita se esistono
+                const statsRef = doc(db, "voti_partita_stats", partitaId);
+                const statsDoc = await getDoc(statsRef);
+                if (statsDoc.exists()) {
+                    await deleteDoc(statsRef);
+                }
+                
+                mostraNotifica(`✅ Partita "${nomePartita}" cancellata con successo`, 'success');
+                
+                // Ricarica la dashboard
+                setTimeout(() => {
+                    chiudiModalAdmin();
+                    mostraDashboardAdminCompleta();
+                }, 1500);
+                
+            } catch (error) {
+                console.error("Errore cancellazione partita:", error);
+                mostraNotifica("❌ Errore nella cancellazione", 'error');
+            }
+        };
+
+        window.cancellaTuttePartite = async () => {
+            if (!isAdmin) {
+                mostraNotifica("❌ Solo l'admin può cancellare i dati", 'error');
+                return;
+            }
+            
+            const conferma = confirm(`ATTENZIONE CRITICA!\n\nStai per cancellare TUTTI i voti di TUTTE le partite!\n\nTUTTI i dati delle votazioni saranno PERDUTI.\n\nQuesta operazione è COMPLETAMENTE IRREVERSIBILE!\n\nSei ASSOLUTAMENTE sicuro?`);
+            
+            if (!conferma) return;
+            
+            try {
+                // 1. Cancella tutti i voti di tutte le partite
+                const matchesSnapshot = await getDocs(collection(db, "matches"));
+                let partiteCancellate = 0;
+                let votiCancellati = 0;
+                
+                for (const docSnap of matchesSnapshot.docs) {
+                    const votiRef = collection(db, "voti_partita", docSnap.id, "voti");
+                    const votiSnapshot = await getDocs(votiRef);
+                    
+                    if (votiSnapshot.size > 0) {
+                        const batch = writeBatch(db);
+                        votiSnapshot.forEach((doc) => {
+                            batch.delete(doc.ref);
+                        });
+                        await batch.commit();
+                        votiCancellati += votiSnapshot.size;
+                        partiteCancellate++;
+                    }
+                    
+                    // Cancella statistiche se esistono
+                    const statsRef = doc(db, "voti_partita_stats", docSnap.id);
+                    const statsDoc = await getDoc(statsRef);
+                    if (statsDoc.exists()) {
+                        await deleteDoc(statsRef);
+                    }
+                }
+                
+                // 2. Resetta le statistiche dei giocatori
+                await resettaStatisticheGiocatori();
+                
+                mostraNotifica(`✅ Cancellazione completata!\n${partiteCancellate} partite\n${votiCancellati} voti cancellati`, 'success');
+                
+                // Ricarica la dashboard
+                setTimeout(() => {
+                    chiudiModalAdmin();
+                    mostraDashboardAdminCompleta();
+                }, 2000);
+                
+            } catch (error) {
+                console.error("Errore cancellazione totale:", error);
+                mostraNotifica("❌ Errore nella cancellazione totale", 'error');
+            }
+        };
+
+        async function resettaStatisticheGiocatori() {
+            try {
+                // Carica tutti i giocatori
+                const giocatoriSnapshot = await getDocs(collection(db, "registry"));
+                const batch = writeBatch(db);
+                
+                giocatoriSnapshot.forEach((docSnap) => {
+                    const datiAggiornati = {
+                        votoBase: 7.0,
+                        partiteGiocate: 0,
+                        mvpTotali: 0,
+                        bonusCommunity: 0,
+                        bonusCommunityUltimaPartita: 0,
+                        storicoVoti: [],
+                        ultimoVoto: null,
+                        dataUltimoVoto: null,
+                        ultimaPartitaGiocata: null
+                    };
+                    
+                    batch.update(docSnap.ref, datiAggiornati);
+                });
+                
+                await batch.commit();
+                console.log("Statistiche giocatori resettate");
+                
+            } catch (error) {
+                console.error("Errore reset statistiche:", error);
+                throw error;
+            }
+        }
+
+        window.visualizzaDettagliPartita = async (partitaId) => {
+            try {
+                // Carica dettagli partita
+                const partitaDoc = await getDoc(doc(db, "matches", partitaId));
+                if (!partitaDoc.exists()) {
+                    mostraNotifica("Partita non trovata", "error");
+                    return;
+                }
+                
+                const partita = partitaDoc.data();
+                
+                // Carica voti della partita
+                const votiSnapshot = await getDocs(collection(db, "voti_partita", partitaId, "voti"));
+                const votantiSet = new Set();
+                const votiPerGiocatore = {};
+                
+                votiSnapshot.forEach(doc => {
+                    const voto = doc.data();
+                    votantiSet.add(voto.da);
+                    
+                    if (!votiPerGiocatore[voto.per]) {
+                        votiPerGiocatore[voto.per] = {
+                            voti: [],
+                            mvp: 0,
+                            somma: 0
+                        };
+                    }
+                    
+                    votiPerGiocatore[voto.per].voti.push(voto.voto);
+                    votiPerGiocatore[voto.per].somma += voto.voto;
+                    if (voto.mvp) votiPerGiocatore[voto.per].mvp++;
+                });
+                
+                // Calcola medie
+                const medieGiocatori = [];
+                for (const [giocatore, dati] of Object.entries(votiPerGiocatore)) {
+                    const media = dati.somma / dati.voti.length;
+                    medieGiocatori.push({
+                        giocatore,
+                        media: media.toFixed(2),
+                        voti: dati.voti.length,
+                        mvp: dati.mvp
+                    });
+                }
+                
+                // Ordina per media decrescente
+                medieGiocatori.sort((a, b) => b.media - a.media);
+                
+                const html = `
+                    <div class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                        <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto">
+                            <div class="flex justify-between items-center mb-6">
+                                <h4 class="font-black text-xl uppercase">📊 Dettagli Partita</h4>
+                                <button onclick="chiudiModal()" 
+                                        class="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+                            </div>
+                            
+                            <div class="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+                                <h5 class="font-black text-blue-800 mb-2">${partita.info?.riga1 || "Partita"}</h5>
+                                <p class="text-blue-700">${partita.info?.riga2 || ""}</p>
+                                <div class="flex gap-3 mt-2">
+                                    <span class="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
+                                        Votanti: ${votantiSet.size}
+                                    </span>
+                                    <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-1 rounded">
+                                        Voti totali: ${votiSnapshot.size}
+                                    </span>
+                                    <span class="text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded">
+                                        Giocatori valutati: ${Object.keys(votiPerGiocatore).length}
+                                    </span>
+                                </div>
+                            </div>
+                            
+                            ${medieGiocatori.length > 0 ? `
+                            <div class="mb-6">
+                                <h5 class="font-black text-[14px] uppercase text-slate-700 mb-4">🏆 Classifica Giocatori</h5>
+                                <div class="space-y-2">
+                                    ${medieGiocatori.map((g, index) => `
+                                        <div class="flex justify-between items-center border rounded-lg p-3 hover:bg-slate-50">
+                                            <div class="flex items-center gap-3">
+                                                <span class="text-xs font-black text-slate-400">${index + 1}.</span>
+                                                <div>
+                                                    <div class="font-bold text-slate-800">${g.giocatore}</div>
+                                                    <div class="text-xs text-slate-500">
+                                                        ${g.voti} voti ${g.mvp > 0 ? '⭐' : ''}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="text-right">
+                                                <div class="font-black text-blue-600 text-lg">${g.media}</div>
+                                                <div class="text-xs text-slate-400">media</div>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                            ` : ''}
+                            
+                            <button onclick="chiudiModal()" 
+                                    class="w-full mt-4 py-3 bg-slate-100 rounded-lg text-[11px] font-black uppercase hover:bg-slate-200">
+                                Chiudi
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                const modalDiv = document.createElement('div');
+                modalDiv.innerHTML = html;
+                document.body.appendChild(modalDiv);
+                
+            } catch (error) {
+                console.error("Errore dettagli partita:", error);
+                mostraNotifica("Errore caricamento dettagli", "error");
+            }
+        };
+
+        window.chiudiModalAdmin = () => {
+            const modal = document.querySelector('.admin-completa-modal');
+            if (modal) modal.remove();
+        };
+
+        window.chiudiModal = () => {
+            const modal = document.querySelector('.admin-completa-modal');
+            if (modal) modal.remove();
+            const dettagliModal = document.querySelector('div[class*="fixed inset-0 bg-black"]:not(.admin-completa-modal)');
+            if (dettagliModal) dettagliModal.remove();
+        };
+
+        // 🔥 FUNZIONI PER VOTAZIONE CON COLORI (CORRETTA)
+        async function inizializzaVotazione() {
+            console.log("Inizializzazione votazione...");
+            renderGrigliaVoti();
+            renderBarraProgresso();
+        }
+
+        function renderGrigliaVoti() {
+            const container = document.getElementById('grigliaVoti');
+            if (!container || !ultimaPartita || !ultimaPartita.squadre) {
+                console.error("Dati partita mancanti per renderGrigliaVoti");
+                container.innerHTML = `
+                    <div class="text-center p-8 bg-white rounded-2xl border">
+                        <p class="text-slate-600">Errore nel caricamento delle squadre</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            
+            ultimaPartita.squadre.forEach((squadra, squadraIndex) => {
+                // Verifica che la squadra sia valida
+                if (!squadra || typeof squadra !== 'object') {
+                    console.warn(`Squadra ${squadraIndex} non valida:`, squadra);
+                    return;
+                }
+                
+                const nomeSquadra = squadra.nome || `Squadra ${squadraIndex + 1}`;
+                
+                // Ottieni il colore della squadra
+                const colore = getColoreSquadra(nomeSquadra);
+                const coloreNome = colore.nome || nomeSquadra;
+                
+                html += `
+                    <div class="mb-8">
+                        <div class="flex items-center gap-3 mb-4">
+                            <div class="${colore.dot} w-5 h-5 rounded-full shadow-md"></div>
+                            <h3 class="font-black text-[14px] uppercase ${colore.text}">
+                                ${coloreNome} (${squadra.players ? squadra.players.length : 0} giocatori)
+                            </h3>
+                        </div>
+                        
+                        <div class="space-y-3">
+                `;
+                
+                // Verifica che ci siano giocatori
+                if (squadra.players && Array.isArray(squadra.players) && squadra.players.length > 0) {
+                    squadra.players.forEach(player => {
+                        if (!player || typeof player !== 'object' || !player.nome) {
+                            console.warn(`Giocatore non valido nella squadra ${squadraIndex}:`, player);
+                            return;
+                        }
+                        
+                        const playerKey = player.nome.replace(/\s/g, '_');
+                        
+                        html += `
+                            <div class="${colore.card} border-2 ${colore.border} rounded-2xl p-4 shadow-sm hover:shadow-md transition-shadow">
+                                <div class="flex justify-between items-center mb-3">
+                                    <div>
+                                        <h4 class="font-black text-slate-800 text-[14px]">${player.nome}</h4>
+                                        ${player.ruolo ? `<p class="text-[10px] ${colore.text} font-bold">${player.ruolo}</p>` : ''}
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="text-[10px] font-black text-slate-400">SELEZIONA VOTO</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="grid grid-cols-5 gap-2 mb-3">
+                                    ${[5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9, 9.5].map(voto => `
+                                        <button onclick="selezionaVoto('${player.nome.replace(/'/g, "\\'")}', ${voto}, ${squadraIndex})"
+                                                class="bg-white border border-slate-300 rounded-xl py-3 text-[12px] font-black hover:${colore.dark.replace('bg-', 'bg-')} hover:text-white hover:border-transparent transition-all duration-200">
+                                            ${voto}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                                
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <button onclick="setMVP('${player.nome.replace(/'/g, "\\'")}', ${squadraIndex})"
+                                                class="bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors">
+                                            ⭐ MVP SQUADRA
+                                        </button>
+                                    </div>
+                                    <div class="text-right">
+                                        <span id="votoSelezionato_${playerKey}" 
+                                              class="text-[11px] text-slate-400 font-black">
+                                            Nessun voto
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    html += `
+                        <div class="${colore.card} border-2 ${colore.border} rounded-2xl p-4 text-center">
+                            <p class="text-slate-500">Nessun giocatore in questa squadra</p>
+                        </div>
+                    `;
+                }
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+            
+            // Aggiungi pulsante invio
+            const invioContainer = document.getElementById('pulsanteInvio');
+            if (invioContainer) {
+                invioContainer.innerHTML = `
+                    <div class="sticky bottom-6 mt-8 bg-white border-2 border-slate-300 rounded-2xl p-4 shadow-xl">
+                        <div class="flex justify-between items-center mb-3">
+                            <div>
+                                <h4 class="font-black text-slate-800 text-[14px]">📊 Riepilogo Voti</h4>
+                                <p class="text-[10px] text-slate-500">Controlla prima di inviare</p>
+                            </div>
+                            <div class="text-right">
+                                <div id="contatoreVoti" class="text-[13px] font-black text-blue-600">0 voti selezionati</div>
+                                <div id="mvpSelezionati" class="text-[10px] text-slate-400">0 MVP</div>
+                            </div>
+                        </div>
+                        <button onclick="confermaInvioVoti()"
+                                class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-black py-4 rounded-xl text-[14px] uppercase transition-all duration-300 shadow-md hover:shadow-lg">
+                            🚀 INVIA I MIEI VOTI
+                        </button>
+                        <p class="text-center text-[8px] text-slate-500 mt-2">
+                            ⚠️ L'invio è definitivo e non modificabile
+                        </p>
+                    </div>
+                `;
+            }
+        }
+
+        window.selezionaVoto = (giocatore, voto, squadraIndex) => {
+            const key = `${giocatore}_${squadraIndex}`;
+            votiInSessione[key] = {
+                giocatore,
+                voto,
+                squadra: squadraIndex,
+                mvp: mvpPerSquadra[squadraIndex] === giocatore
+            };
+            
+            // Aggiorna display
+            const displayElement = document.getElementById(`votoSelezionato_${giocatore.replace(/\s/g, '_')}`);
+            if (displayElement) {
+                displayElement.textContent = `Voto: ${voto}`;
+                displayElement.className = "text-[12px] text-green-600 font-black animate-pulse";
+                
+                // Rimuovi animazione dopo 1 secondo
+                setTimeout(() => {
+                    displayElement.classList.remove('animate-pulse');
+                }, 1000);
+            }
+            
+            // Evidenzia il bottone selezionato
+            const buttons = document.querySelectorAll(`[onclick*="selezionaVoto('${giocatore}'"]`);
+            buttons.forEach(btn => {
+                if (btn.textContent.includes(voto.toString())) {
+                    btn.classList.add('bg-green-500', 'text-white', 'border-green-500');
+                    btn.classList.remove('bg-white', 'border-slate-300');
+                } else {
+                    btn.classList.remove('bg-green-500', 'text-white', 'border-green-500');
+                    btn.classList.add('bg-white', 'border-slate-300');
+                }
+            });
+            
+            // Aggiorna contatore
+            aggiornaContatoreVoti();
+            
+            mostraNotifica(`Voto ${voto} per ${giocatore}`, 'success');
+        };
+
+        window.setMVP = (giocatore, squadraIndex) => {
+            // Rimuovi MVP precedente della stessa squadra
+            const mvpPrecedente = mvpPerSquadra[squadraIndex];
+            if (mvpPrecedente) {
+                const oldButton = document.querySelector(`[onclick*="setMVP('${mvpPrecedente}'"]`);
+                if (oldButton) {
+                    oldButton.className = "bg-yellow-100 hover:bg-yellow-200 text-yellow-800 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors";
+                }
+            }
+            
+            // Imposta nuovo MVP
+            mvpPerSquadra[squadraIndex] = giocatore;
+            
+            // Aggiorna pulsante
+            const button = document.querySelector(`[onclick*="setMVP('${giocatore}'"]`);
+            if (button) {
+                button.className = "bg-yellow-400 hover:bg-yellow-500 text-yellow-900 px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors animate-pulse";
+                
+                // Rimuovi animazione dopo 2 secondi
+                setTimeout(() => {
+                    button.classList.remove('animate-pulse');
+                }, 2000);
+            }
+            
+            // Aggiorna voto in sessione se esiste
+            const key = `${giocatore}_${squadraIndex}`;
+            if (votiInSessione[key]) {
+                votiInSessione[key].mvp = true;
+            }
+            
+            mostraNotifica(`⭐ MVP squadra: ${giocatore}`, 'success');
+            aggiornaContatoreVoti();
+        };
+
+        function aggiornaContatoreVoti() {
+            const contatoreElement = document.getElementById('contatoreVoti');
+            const mvpElement = document.getElementById('mvpSelezionati');
+            
+            if (contatoreElement) {
+                const numVoti = Object.keys(votiInSessione).length;
+                let numGiocatoriTotali = 0;
+                
+                if (ultimaPartita && ultimaPartita.squadre) {
+                    ultimaPartita.squadre.forEach(squadra => {
+                        if (squadra && squadra.players) {
+                            numGiocatoriTotali += squadra.players.length;
+                        }
+                    });
+                }
+                
+                contatoreElement.textContent = `${numVoti}/${numGiocatoriTotali} voti`;
+                contatoreElement.className = `text-[13px] font-black ${numVoti === numGiocatoriTotali ? 'text-green-600' : 'text-blue-600'}`;
+                
+                // Conta MVP
+                const numMVP = Object.values(mvpPerSquadra).filter(mvp => mvp).length;
+                if (mvpElement) {
+                    mvpElement.textContent = `${numMVP} MVP selezionati`;
+                    mvpElement.className = `text-[10px] ${numMVP > 0 ? 'text-yellow-600 font-bold' : 'text-slate-400'}`;
+                }
+            }
+        }
+
+        window.confermaInvioVoti = async () => {
+            let numGiocatoriTotali = 0;
+            if (ultimaPartita && ultimaPartita.squadre) {
+                ultimaPartita.squadre.forEach(squadra => {
+                    if (squadra && squadra.players) {
+                        numGiocatoriTotali += squadra.players.length;
+                    }
+                });
+            }
+            
+            const numVoti = Object.keys(votiInSessione).length;
+            
+            if (numVoti < numGiocatoriTotali) {
+                const conferma = confirm(`Hai votato solo ${numVoti} giocatori su ${numGiocatoriTotali}.\n\nVuoi procedere ugualmente?`);
+                if (!conferma) return;
+            }
+            
+            try {
+                // Salva i voti nel database
+                const batch = writeBatch(db);
+                let votiSalvatiCount = 0;
+                
+                for (const [key, votoData] of Object.entries(votiInSessione)) {
+                    const votoDocRef = doc(collection(db, "voti_partita", ultimaPartita.id, "voti"));
+                    
+                    batch.set(votoDocRef, {
+                        da: utenteCorrente.nome,
+                        per: votoData.giocatore,
+                        voto: votoData.voto,
+                        mvp: votoData.mvp || false,
+                        squadra: votoData.squadra,
+                        timestamp: new Date().toISOString(),
+                        utenteId: utenteCorrente.id,
+                        isOspite: utenteCorrente.isOspite || false
+                    });
+                    
+                    votiSalvatiCount++;
+                }
+                
+                await batch.commit();
+                
+                // Aggiorna statistiche utente
+                await aggiornaStatisticheUtente();
+                
+                votiSalvati = true;
+                mostraNotifica(`✅ ${votiSalvatiCount} voti inviati con successo!`, 'success');
+                
+                // Mostra riepilogo e poi schermata già votato
+                setTimeout(async () => {
+                    await mostraRiepilogoVoti();
+                    setTimeout(() => {
+                        mostraSchermataGiaVotato();
+                    }, 3000);
+                }, 2000);
+                
+            } catch (error) {
+                console.error("Errore invio voti:", error);
+                mostraNotifica("❌ Errore nell'invio dei voti", 'error');
+            }
+        };
+
+        async function aggiornaStatisticheUtente() {
+            try {
+                // Incrementa partite giocate per l'utente corrente
+                const userRef = doc(db, "registry", utenteCorrente.id);
+                const userDoc = await getDoc(userRef);
+                
+                if (userDoc.exists()) {
+                    await updateDoc(userRef, {
+                        partiteGiocate: increment(1),
+                        ultimaPartitaGiocata: ultimaPartita.id,
+                        dataUltimaPartita: new Date().toISOString()
+                    });
+                }
+            } catch (error) {
+                console.error("Errore aggiornamento statistiche:", error);
+            }
+        }
+
+        // 🔥 FUNZIONE STATISTICHE REALI
+        window.visualizzaStatistichePersonali = async () => {
+            try {
+                if (!utenteCorrente || !utenteCorrente.nome) {
+                    mostraNotifica("Utente non riconosciuto", "error");
+                    return;
+                }
+                
+                // Carica dati giocatore
+                const userRef = doc(db, "registry", utenteCorrente.id);
+                const userDoc = await getDoc(userRef);
+                
+                let userData = {};
+                if (userDoc.exists()) {
+                    userData = userDoc.data();
+                }
+                
+                // Carica tutte le partite dove ha votato
+                const matchesSnapshot = await getDocs(collection(db, "matches"));
+                const partiteConMieiVoti = [];
+                
+                for (const docSnap of matchesSnapshot.docs) {
+                    const partitaId = docSnap.id;
+                    const votiRef = collection(db, "voti_partita", partitaId, "voti");
+                    const q = query(votiRef, where("da", "==", utenteCorrente.nome));
+                    const votiSnapshot = await getDocs(q);
+                    
+                    if (!votiSnapshot.empty) {
+                        const partita = docSnap.data();
+                        partiteConMieiVoti.push({
+                            nome: partita.info?.riga1 || `Partita ${partitaId}`,
+                            data: partita.info?.riga2 || "",
+                            id: partitaId
+                        });
+                    }
+                }
+                
+                // Mostra statistiche
+                document.getElementById('benvenutoArea').classList.add('hidden');
+                document.getElementById('votazioneArea').classList.add('hidden');
+                document.getElementById('nonPartecipanteArea').classList.add('hidden');
+                document.getElementById('giaVotatoArea').classList.add('hidden');
+                
+                const statsHTML = `
+                    <div class="animate-fade-in">
+                        <div class="text-center mb-8">
+                            <div class="w-20 h-20 bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+                                <span class="text-white text-3xl">📊</span>
+                            </div>
+                            <h2 class="font-black text-2xl uppercase text-purple-900 mb-2">
+                                Statistiche di ${utenteCorrente.nome}
+                            </h2>
+                            ${utenteCorrente.isOspite ? 
+                                '<p class="text-[10px] text-orange-600 font-bold">👤 Accesso come ospite</p>' : ''}
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4 mb-6">
+                            <div class="bg-gradient-to-br from-blue-50 to-blue-100 border-2 border-blue-200 rounded-2xl p-4 text-center shadow-sm">
+                                <div class="text-[10px] font-bold text-blue-700 uppercase">Voto Base</div>
+                                <div class="text-3xl font-black text-blue-900">${userData.votoBase ? userData.votoBase.toFixed(2) : "7.00"}</div>
+                                <div class="text-[8px] text-blue-600">media attuale</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-emerald-50 to-emerald-100 border-2 border-emerald-200 rounded-2xl p-4 text-center shadow-sm">
+                                <div class="text-[10px] font-bold text-emerald-700 uppercase">Partite Giocate</div>
+                                <div class="text-3xl font-black text-emerald-900">${userData.partiteGiocate || 0}</div>
+                                <div class="text-[8px] text-emerald-600">totale</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-yellow-50 to-yellow-100 border-2 border-yellow-200 rounded-2xl p-4 text-center shadow-sm">
+                                <div class="text-[10px] font-bold text-yellow-700 uppercase">MVP Totali</div>
+                                <div class="text-3xl font-black text-yellow-900">${userData.mvpTotali || 0}</div>
+                                <div class="text-[8px] text-yellow-600">votazioni</div>
+                            </div>
+                            <div class="bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-200 rounded-2xl p-4 text-center shadow-sm">
+                                <div class="text-[10px] font-bold text-purple-700 uppercase">Punti Community</div>
+                                <div class="text-3xl font-black text-purple-900">${userData.bonusCommunity || 0}</div>
+                                <div class="text-[8px] text-purple-600">accumulati</div>
+                            </div>
+                        </div>
+                        
+                        ${partiteConMieiVoti.length > 0 ? `
+                        <div class="mb-6">
+                            <h3 class="font-black text-[14px] uppercase text-slate-700 mb-4">📅 Partite Votate</h3>
+                            <div class="space-y-2">
+                                ${partiteConMieiVoti.map(partita => `
+                                    <div class="border-2 border-slate-200 rounded-xl p-3 hover:bg-slate-50 transition-colors">
+                                        <div class="font-bold text-slate-800">${partita.nome}</div>
+                                        <div class="text-[10px] text-slate-500">${partita.data}</div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                        ` : ''}
+                        
+                        <div class="space-y-3">
+                            <button onclick="window.location.href='votazioni.html'"
+                                    class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all duration-300">
+                                ↩️ TORNA ALLE VOTAZIONI
+                            </button>
+                            <button onclick="logout()"
+                                    class="w-full bg-gradient-to-r from-red-100 to-red-200 hover:from-red-200 hover:to-red-300 border-2 border-red-300 text-red-700 font-black py-3 rounded-xl text-[10px] uppercase transition-all duration-300">
+                                🚪 LOGOUT
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                document.querySelector('main').innerHTML = statsHTML;
+                
+            } catch (error) {
+                console.error("Errore visualizzazione statistiche:", error);
+                mostraNotifica("Errore caricamento statistiche", "error");
+            }
+        };
+
+        // 🔥 FUNZIONI UI
+        function aggiornaUIUtente() {
+            const userBadge = document.getElementById('userBadge');
+            if (userBadge && utenteCorrente) {
+                userBadge.textContent = `👤 ${utenteCorrente.nome}`;
+                if (utenteCorrente.isOspite) {
+                    userBadge.innerHTML += ` <span class="text-[8px] text-orange-600">(ospite)</span>`;
+                }
+                if (utenteCorrente.isAdmin) {
+                    userBadge.innerHTML += ` <span class="text-[8px] text-purple-600">(admin)</span>`;
+                }
+            }
+            
+            document.title = `Scarpari Voti - ${utenteCorrente ? utenteCorrente.nome : 'Guest'}`;
+        }
+
+        function mostraSchermataNonPartecipante() {
+            document.getElementById('benvenutoArea').classList.add('hidden');
+            document.getElementById('votazioneArea').classList.add('hidden');
+            document.getElementById('nonPartecipanteArea').classList.remove('hidden');
+            
+            document.getElementById('nomeNonPartecipante').textContent = utenteCorrente.nome;
+            document.getElementById('dataPartitaInfo').textContent = 
+                ultimaPartita?.info?.riga2 || "Data non disponibile";
+            document.getElementById('nomePartitaInfo').textContent = 
+                ultimaPartita?.info?.riga1 || "Partita";
+        }
+
+        function mostraSchermataGiaVotato() {
+            document.getElementById('benvenutoArea').classList.add('hidden');
+            document.getElementById('votazioneArea').classList.add('hidden');
+            document.getElementById('giaVotatoArea').classList.remove('hidden');
+            
+            document.getElementById('nomeGiaVotato').textContent = utenteCorrente.nome;
+            
+            // Aggiungi pulsante per vedere riepilogo voti
+            const container = document.getElementById('giaVotatoArea');
+            const existingButtons = container.querySelector('.space-y-3');
+            
+            if (existingButtons) {
+                const riepilogoBtn = document.createElement('button');
+                riepilogoBtn.onclick = async () => {
+                    try {
+                        await mostraRiepilogoVoti();
+                    } catch (error) {
+                        console.error("Errore apertura riepilogo:", error);
+                        mostraNotifica("Errore nel caricamento del riepilogo", "error");
+                    }
+                };
+                riepilogoBtn.className = 'w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all duration-300';
+                riepilogoBtn.textContent = '📋 VEDI I MIEI VOTI';
+                existingButtons.insertBefore(riepilogoBtn, existingButtons.firstChild);
+            }
+        }
+
+        function mostraVotazioniChiuse() {
+            const container = document.getElementById('votazioneArea');
+            container.innerHTML = `
+                <div class="text-center py-20">
+                    <div class="w-20 h-20 bg-gradient-to-r from-orange-100 to-orange-200 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
+                        <span class="text-3xl text-orange-600">⏰</span>
+                    </div>
+                    <h2 class="font-black text-2xl uppercase text-orange-900 mb-2">
+                        Votazioni Chiuse
+                    </h2>
+                    <p class="text-[11px] font-bold text-slate-600 mb-6">
+                        Le votazioni per questa partita sono terminate
+                    </p>
+                    <div class="space-y-3">
+                        <button onclick="visualizzaStatistichePersonali()" 
+                                class="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg hover:shadow-xl transition-all duration-300">
+                            📊 VEDI STATISTICHE
+                        </button>
+                        <button onclick="mostraRiepilogoVoti()" 
+                                class="w-full bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg hover:shadow-xl transition-all duration-300">
+                            📋 VEDI I MIEI VOTI
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function mostraErrore(messaggio) {
+            document.getElementById('benvenutoArea').classList.add('hidden');
+            document.getElementById('votazioneArea').classList.add('hidden');
+            document.getElementById('nonPartecipanteArea').classList.add('hidden');
+            document.getElementById('giaVotatoArea').classList.add('hidden');
+            
+            const html = `
+                <div class="text-center py-20">
+                    <div class="w-20 h-20 bg-gradient-to-r from-red-100 to-red-200 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
+                        <span class="text-3xl text-red-600">⚠️</span>
+                    </div>
+                    <h2 class="font-black text-2xl uppercase text-red-900 mb-2">
+                        Errore
+                    </h2>
+                    <p class="text-[11px] font-bold text-slate-600 mb-6">${messaggio}</p>
+                    <button onclick="window.location.href='login_voti.html'" 
+                            class="w-full max-w-xs mx-auto bg-gradient-to-r from-blue-600 to-purple-600 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg hover:shadow-xl transition-all duration-300">
+                        Torna al Login
+                    </button>
+                </div>
+            `;
+            
+            document.querySelector('main').innerHTML = html;
+        }
+
+        function mostraNotifica(messaggio, tipo = 'info') {
+            const notifica = document.createElement('div');
+            const colori = {
+                success: 'bg-gradient-to-r from-emerald-500 to-green-500',
+                error: 'bg-gradient-to-r from-red-500 to-pink-500',
+                info: 'bg-gradient-to-r from-blue-500 to-cyan-500',
+                warning: 'bg-gradient-to-r from-orange-500 to-amber-500'
+            };
+            
+            notifica.className = `fixed top-20 right-4 z-50 text-white px-4 py-3 rounded-xl shadow-2xl font-black text-[11px] border-l-4 border-white/50 ${colori[tipo] || 'bg-gradient-to-r from-blue-500 to-cyan-500'} animate-fade-in`;
+            notifica.innerHTML = messaggio;
+            notifica.style.zIndex = '9999';
+            
+            document.body.appendChild(notifica);
+            
+            setTimeout(() => {
+                notifica.style.opacity = '0';
+                notifica.style.transform = 'translateX(20px)';
+                setTimeout(() => notifica.remove(), 300);
+            }, 3000);
+        }
+
+        // 🔥 FUNZIONI GLOBALI
+        window.logout = () => {
+            localStorage.removeItem('scarpari_voti_user');
+            sessionStorage.removeItem('votazioni_utente_corrente');
+            sessionStorage.removeItem('visualizza_statistiche');
+            sessionStorage.removeItem('scarpari_admin_logged');
+            window.location.href = "login_voti.html";
+        };
+
+        window.vediStatistiche = () => {
+            visualizzaStatistichePersonali();
+        };
+
+        // INIZIALIZZAZIONE
+        document.addEventListener('DOMContentLoaded', async () => {
+            console.log("📱 DOM caricato - inizializzazione");
+            await inizializza();
+        });
+
+    </script>
+    <style>
+        .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        button { cursor: pointer; }
+        .btn-voto-selected {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        .animate-pulse {
+            animation: pulse 1s ease-in-out;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-50 to-blue-50 text-slate-900 font-sans select-none min-h-screen">
+
+    <!-- Header -->
+    <nav class="bg-white/95 backdrop-blur-md sticky top-0 z-20 p-4 border-b shadow-sm">
+        <div class="max-w-xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-r from-blue-600 to-purple-600 w-8 h-8 rounded-lg flex items-center justify-center">
+                    <span class="text-white text-sm font-black italic">EVO</span>
+                </div>
+                <h1 class="font-black italic text-xl uppercase tracking-tighter">Scarpari <span class="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Voti</span></h1>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="mostraDashboardAdmin()" 
+                        class="bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-full px-3 py-1 text-[9px] font-black uppercase hover:from-slate-800 hover:to-slate-700 transition-all duration-300 shadow-md">
+                    👑 Admin
+                </button>
+                <div class="flex items-center gap-2">
+                    <span id="userBadge" class="text-[10px] font-black text-slate-700 bg-gradient-to-r from-slate-100 to-slate-200 px-3 py-1 rounded-full shadow-sm">
+                        👤 Guest
+                    </span>
+                    <button onclick="logout()" 
+                            class="bg-gradient-to-r from-slate-200 to-slate-300 hover:from-slate-300 hover:to-slate-400 text-slate-700 rounded-full px-3 py-1 text-[9px] font-black uppercase transition-all duration-300 shadow-sm">
+                        🚪 Logout
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-xl mx-auto p-4 pb-32">
+        <!-- Benvenuto -->
+        <div id="benvenutoArea" class="text-center py-20">
+            <div class="w-20 h-20 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-6 shadow-xl animate-pulse">
+                <span class="text-white text-2xl font-black italic">EVO</span>
+            </div>
+            <h2 class="font-black text-2xl uppercase bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-2">Caricamento in corso...</h2>
+            <p class="text-[10px] text-slate-500">Preparazione sistema di votazione</p>
+        </div>
+
+        <!-- Area Votazione -->
+        <div id="votazioneArea" class="hidden">
+            <!-- Barra Progresso (visibile a tutti) -->
+            <div id="barraProgresso"></div>
+            
+            <!-- Griglia voti -->
+            <div id="grigliaVoti"></div>
+            
+            <!-- Pulsante Invio Voti -->
+            <div id="pulsanteInvio"></div>
+            
+            <!-- Pulsanti aggiuntivi -->
+            <div class="mt-6 space-y-3">
+                <button onclick="visualizzaStatistichePersonali()" 
+                        class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-black py-3 rounded-xl text-[11px] uppercase shadow-lg transition-all duration-300">
+                    📊 MIE STATISTICHE
+                </button>
+            </div>
+        </div>
+
+        <!-- Non Partecipante -->
+        <div id="nonPartecipanteArea" class="hidden">
+            <div class="text-center py-20">
+                <div class="w-20 h-20 bg-gradient-to-r from-yellow-100 to-yellow-200 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
+                    <span class="text-3xl text-yellow-600">🏆</span>
+                </div>
+                <h2 class="font-black text-2xl uppercase text-blue-900 mb-2">
+                    Ciao <span id="nomeNonPartecipante" class="bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent"></span>!
+                </h2>
+                <p class="text-[11px] font-bold text-slate-600 mb-6">
+                    Non hai partecipato all'ultima partita
+                </p>
+                
+                <div class="bg-gradient-to-r from-blue-50/70 to-cyan-50/70 border-2 border-blue-200/50 rounded-2xl p-4 mb-6 backdrop-blur-sm">
+                    <p id="nomePartitaInfo" class="text-[13px] font-bold text-blue-900 mb-1">Partita</p>
+                    <p class="text-[10px] text-blue-600">Data: <span id="dataPartitaInfo">Data non disponibile</span></p>
+                </div>
+                
+                <div class="space-y-3">
+                    <button onclick="visualizzaStatistichePersonali()" 
+                            class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all duration-300">
+                        📊 VEDI LE MIE STATISTICHE
+                    </button>
+                    <button onclick="logout()" 
+                            class="w-full bg-gradient-to-r from-red-100 to-red-200 hover:from-red-200 hover:to-red-300 border-2 border-red-300 text-red-700 font-black py-3 rounded-xl text-[10px] uppercase transition-all duration-300">
+                        🚪 LOGOUT
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Già Votato -->
+        <div id="giaVotatoArea" class="hidden">
+            <div class="text-center py-20">
+                <div class="w-20 h-20 bg-gradient-to-r from-emerald-100 to-green-100 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
+                    <span class="text-3xl text-emerald-600">✅</span>
+                </div>
+                <h2 class="font-black text-2xl uppercase text-emerald-900 mb-2">
+                    Ciao <span id="nomeGiaVotato" class="bg-gradient-to-r from-emerald-600 to-green-600 bg-clip-text text-transparent"></span>!
+                </h2>
+                <p class="text-[11px] font-bold text-slate-600 mb-6">
+                    Hai già espresso i tuoi voti per questa partita
+                </p>
+                
+                <div class="space-y-3">
+                    <button onclick="visualizzaStatistichePersonali()" 
+                            class="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all duration-300">
+                        📊 VEDI LE MIE STATISTICHE
+                    </button>
+                    
+                    <button onclick="logout()" 
+                            class="w-full bg-gradient-to-r from-red-100 to-red-200 hover:from-red-200 hover:to-red-300 border-2 border-red-300 text-red-700 font-black py-3 rounded-xl text-[10px] uppercase transition-all duration-300">
+                        🚪 LOGOUT
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center pb-4">
+        <p class="text-[8px] text-slate-400">Scarpari Evo Voting System © 2024</p>
+    </footer>
+
+</body>
+</html>

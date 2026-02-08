@@ -1,0 +1,836 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Scarpari Evo - Accesso Voti</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio,line-clamp"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap" rel="stylesheet">
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getFirestore, collection, getDocs, doc, getDoc, setDoc, query, where, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDjpa153B8IJvVTQYvtZwGiPSqpCe7jiQ4",
+            authDomain: "scarpari-inside-evo.firebaseapp.com",
+            projectId: "scarpari-inside-evo",
+            storageBucket: "scarpari-inside-evo.firebasestorage.app",
+            messagingSenderId: "446358185465",
+            appId: "1:446358185465:web:02e7842940299e43368928"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        let ultimaPartita = null;
+        let listaOspiti = [];
+        let adminList = [];
+
+        // Carica lista admin da Firebase
+        async function caricaListaAdmin() {
+            try {
+                const adminDoc = await getDoc(doc(db, "config", "admin_list"));
+                if (adminDoc.exists()) {
+                    adminList = adminDoc.data().admin || ['Admin', 'Scarpari Admin'];
+                    console.log("Admin list caricata:", adminList);
+                } else {
+                    // Se non esiste, crea documento con admin di default
+                    await setDoc(doc(db, "config", "admin_list"), {
+                        admin: ['Admin', 'Scarpari Admin'],
+                        updated: new Date().toISOString()
+                    });
+                    adminList = ['Admin', 'Scarpari Admin'];
+                }
+            } catch (error) {
+                console.error("Errore caricamento admin:", error);
+                adminList = ['Admin', 'Scarpari Admin'];
+            }
+        }
+
+        // Verifica se un utente è admin
+        function verificaAdmin(nomeGiocatore) {
+            return adminList.includes(nomeGiocatore);
+        }
+
+        // Normalizza numero telefono per input utente
+        function normalizzaTelefono(telefono) {
+            if (!telefono) return "";
+            let tel = telefono.toString().replace(/[\s\.\-\(\)\/]/g, '');
+            
+            if (tel.startsWith('+39')) {
+                tel = tel.substring(3);
+            }
+            if (tel.startsWith('0039')) {
+                tel = tel.substring(4);
+            }
+            if (tel.startsWith('39') && tel.length > 2) {
+                tel = tel.substring(2);
+            }
+            if (tel.startsWith('0') && tel.length > 1) {
+                tel = tel.substring(1);
+            }
+            
+            tel = tel.replace(/\D/g, '');
+            return tel.trim();
+        }
+
+        // Normalizza numero telefono dal database
+        function normalizzaTelefonoDatabase(tel) {
+            if (!tel) return "";
+            return tel.toString().replace(/[\s\.\-\(\)\/\+]/g, '').replace(/\D/g, '');
+        }
+
+        // Verifica credenziali
+        async function verificaCredenziali(email, telefono) {
+            try {
+                console.log("Verifica credenziali per:", { email, telefono });
+                
+                // 1. Cerca per email (case insensitive)
+                if (email && email.trim() !== "") {
+                    const emailNormalizzata = email.toLowerCase().trim();
+                    const emailQuery = query(collection(db, "registry"), where("email", "==", emailNormalizzata));
+                    const emailSnap = await getDocs(emailQuery);
+                    
+                    if (!emailSnap.empty) {
+                        const docData = emailSnap.docs[0].data();
+                        console.log("Trovato per email:", docData);
+                        const isAdminUser = verificaAdmin(docData.nome || emailSnap.docs[0].id.replace(/_/g, ' '));
+                        return {
+                            success: true,
+                            id: emailSnap.docs[0].id,
+                            nome: docData.nome || emailSnap.docs[0].id.replace(/_/g, ' '),
+                            dati: docData,
+                            isAdmin: isAdminUser
+                        };
+                    }
+                }
+
+                // 2. Cerca per telefono (normalizzato)
+                if (telefono && telefono.trim() !== "") {
+                    const telNormalizzato = normalizzaTelefono(telefono);
+                    console.log("Telefono normalizzato input:", telNormalizzato);
+                    
+                    if (telNormalizzato.length >= 6) {
+                        const registrySnap = await getDocs(collection(db, "registry"));
+                        
+                        for (const docSnap of registrySnap.docs) {
+                            const dati = docSnap.data();
+                            if (dati.telefono) {
+                                const telDbNormalizzato = normalizzaTelefonoDatabase(dati.telefono);
+                                console.log(`DB: ${dati.nome} - Tel: ${dati.telefono} -> ${telDbNormalizzato}`);
+                                
+                                if (telDbNormalizzato === telNormalizzato || 
+                                    telDbNormalizzato.endsWith(telNormalizzato) ||
+                                    telNormalizzato.endsWith(telDbNormalizzato)) {
+                                    console.log("Trovato match telefono:", dati);
+                                    const isAdminUser = verificaAdmin(dati.nome || docSnap.id.replace(/_/g, ' '));
+                                    return {
+                                        success: true,
+                                        id: docSnap.id,
+                                        nome: dati.nome || docSnap.id.replace(/_/g, ' '),
+                                        dati: dati,
+                                        isAdmin: isAdminUser
+                                    };
+                                }
+                            }
+                        }
+                        
+                        // Secondo tentativo: cerca anche nei nomi se telefono non trovato
+                        console.log("Telefono non trovato, cerco nel nome...");
+                        for (const docSnap of registrySnap.docs) {
+                            const dati = docSnap.data();
+                            const nomeGiocatore = dati.nome || docSnap.id.replace(/_/g, ' ');
+                            if (nomeGiocatore.toLowerCase().includes(telefono.toLowerCase()) ||
+                                telefono.toLowerCase().includes(nomeGiocatore.toLowerCase())) {
+                                console.log("Trovato per nome simile:", nomeGiocatore);
+                                const isAdminUser = verificaAdmin(nomeGiocatore);
+                                return {
+                                    success: true,
+                                    id: docSnap.id,
+                                    nome: nomeGiocatore,
+                                    dati: dati,
+                                    isAdmin: isAdminUser
+                                };
+                            }
+                        }
+                    }
+                }
+
+                console.log("Credenziali non trovate");
+                return { 
+                    success: false, 
+                    message: "Credenziali non trovate. Verifica email/telefono o contatta l'admin." 
+                };
+
+            } catch (error) {
+                console.error("Errore verifica credenziali:", error);
+                return { 
+                    success: false, 
+                    message: "Errore di connessione al database. Riprova più tardi." 
+                };
+            }
+        }
+
+        async function caricaDati() {
+            try {
+                // Carica prima la lista admin
+                await caricaListaAdmin();
+                
+                // 1. Carica ultima partita
+                const q = query(collection(db, "matches"), orderBy("dataArchiviazione", "desc"), limit(1));
+                const snap = await getDocs(q);
+                
+                if (snap.empty) {
+                    mostraSchermataErrore("Nessuna partita trovata nel sistema");
+                    return;
+                }
+                
+                ultimaPartita = { id: snap.docs[0].id, ...snap.docs[0].data() };
+                console.log("Partita caricata:", ultimaPartita.info);
+                
+                // Aggiorna info partita nell'UI
+                document.getElementById('nomePartitaLogin').textContent = ultimaPartita.info?.riga1 || "Partita Scarpari";
+                document.getElementById('dataPartitaLogin').textContent = ultimaPartita.info?.riga2 || "";
+                
+                // 2. Carica lista ospiti (partecipanti senza anagrafica completa)
+                await caricaListaOspiti();
+                
+                // 3. Verifica se utente è già loggato
+                const savedUser = localStorage.getItem('scarpari_voti_user');
+                if (savedUser) {
+                    try {
+                        const userData = JSON.parse(savedUser);
+                        const now = new Date();
+                        const expiry = new Date(userData.expiry);
+                        
+                        if (now < expiry) {
+                            // Verifica partecipazione
+                            const partecipa = verificaPartecipazionePartita(userData.nome);
+                            
+                            if (partecipa) {
+                                // Verifica se ha già votato
+                                const giaVotato = await haGiaVotato(userData.nome);
+                                
+                                if (giaVotato) {
+                                    mostraSchermataGiaVotato(userData.nome);
+                                } else {
+                                    // Vai direttamente alle votazioni
+                                    sessionStorage.setItem('votazioni_utente_corrente', JSON.stringify(userData));
+                                    console.log("Utente loggato precedentemente, redirect a votazioni:", userData);
+                                    window.location.href = "votazioni.html";
+                                }
+                                return;
+                            } else {
+                                mostraSchermataNonPartecipante(userData.nome);
+                                return;
+                            }
+                        }
+                    } catch (e) {
+                        console.error("Errore parse saved user:", e);
+                        localStorage.removeItem('scarpari_voti_user');
+                    }
+                }
+                
+            } catch (error) {
+                console.error("Errore caricamento:", error);
+                mostraSchermataErrore("Errore di connessione al database");
+            }
+        }
+
+        // Carica lista ospiti (partecipanti senza anagrafica completa)
+        async function caricaListaOspiti() {
+            try {
+                listaOspiti = [];
+                const partecipantiSet = new Set();
+                
+                // Raccogli tutti i partecipanti alla partita
+                if (ultimaPartita && ultimaPartita.squadre) {
+                    ultimaPartita.squadre.forEach(squadra => {
+                        if (squadra && squadra.players) {
+                            squadra.players.forEach(player => {
+                                if (player && player.nome) {
+                                    partecipantiSet.add(player.nome);
+                                }
+                            });
+                        }
+                    });
+                }
+                
+                // Carica anagrafica per verificare quali hanno credenziali
+                const registrySnap = await getDocs(collection(db, "registry"));
+                const giocatoriRegistrati = new Set();
+                
+                registrySnap.forEach(docSnap => {
+                    const dati = docSnap.data();
+                    if (dati.nome) {
+                        giocatoriRegistrati.add(dati.nome.toLowerCase());
+                    } else {
+                        giocatoriRegistrati.add(docSnap.id.replace(/_/g, ' ').toLowerCase());
+                    }
+                });
+                
+                // Gli ospiti sono partecipanti senza anagrafica completa
+                const partecipanti = Array.from(partecipantiSet);
+                
+                for (const nomePartecipante of partecipanti) {
+                    const haAnagrafica = Array.from(giocatoriRegistrati).some(nomeRegistrato => 
+                        nomeRegistrato === nomePartecipante.toLowerCase()
+                    );
+                    
+                    if (!haAnagrafica) {
+                        listaOspiti.push({
+                            nome: nomePartecipante,
+                            isOspite: true
+                        });
+                    }
+                }
+                
+                // Popola il menu a tendina
+                popolaSelezioneOspiti();
+                
+            } catch (error) {
+                console.error("Errore caricamento ospiti:", error);
+            }
+        }
+
+        function popolaSelezioneOspiti() {
+            const selectOspiti = document.getElementById('selectOspite');
+            selectOspiti.innerHTML = '<option value="">Seleziona il tuo nome...</option>';
+            
+            if (listaOspiti.length === 0) {
+                const option = document.createElement('option');
+                option.value = "";
+                option.textContent = "Nessun ospite nella partita";
+                option.disabled = true;
+                selectOspiti.appendChild(option);
+                return;
+            }
+            
+            // Ordina alfabeticamente
+            listaOspiti.sort((a, b) => a.nome.localeCompare(b.nome));
+            
+            listaOspiti.forEach(ospite => {
+                const option = document.createElement('option');
+                option.value = ospite.nome;
+                option.textContent = ospite.nome;
+                selectOspiti.appendChild(option);
+            });
+        }
+
+        function verificaPartecipazionePartita(nomeGiocatore) {
+            if (!ultimaPartita || !nomeGiocatore || !ultimaPartita.squadre) return false;
+            
+            for (const squadra of ultimaPartita.squadre) {
+                if (squadra && squadra.players) {
+                    for (const player of squadra.players) {
+                        if (player && player.nome && player.nome.toLowerCase() === nomeGiocatore.toLowerCase()) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        async function haGiaVotato(nomeGiocatore) {
+            if (!ultimaPartita || !nomeGiocatore) return false;
+            
+            try {
+                const votiRef = collection(db, "voti_partita", ultimaPartita.id, "voti");
+                const q = query(votiRef, where("da", "==", nomeGiocatore));
+                const snapshot = await getDocs(q);
+                return !snapshot.empty;
+            } catch (error) {
+                console.error("Errore verifica voto:", error);
+                return false;
+            }
+        }
+
+        window.verificaLogin = async () => {
+            const email = document.getElementById('inputEmail').value.trim();
+            const telefono = document.getElementById('inputTelefono').value.trim();
+            
+            if (!email && !telefono) {
+                mostraMessaggio("Inserisci email o telefono", "error");
+                return;
+            }
+            
+            // Mostra caricamento
+            const btn = event.target;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '🔍 Verifica in corso...';
+            btn.disabled = true;
+            
+            const risultato = await verificaCredenziali(email, telefono);
+            
+            // Ripristina bottone
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+            
+            if (risultato.success) {
+                const nomeGiocatore = risultato.nome;
+                const partecipa = verificaPartecipazionePartita(nomeGiocatore);
+                
+                if (!partecipa) {
+                    mostraSchermataNonPartecipante(nomeGiocatore);
+                    return;
+                }
+                
+                const giaVotato = await haGiaVotato(nomeGiocatore);
+                if (giaVotato) {
+                    mostraSchermataGiaVotato(nomeGiocatore);
+                    return;
+                }
+                
+                // Salva sessione (30 giorni)
+                const expiry = new Date();
+                expiry.setDate(expiry.getDate() + 30);
+                
+                const userSession = {
+                    id: risultato.id,
+                    nome: nomeGiocatore,
+                    email: risultato.dati.email || "",
+                    telefono: risultato.dati.telefono || "",
+                    isAdmin: risultato.isAdmin || false,
+                    expiry: expiry.toISOString()
+                };
+                
+                localStorage.setItem('scarpari_voti_user', JSON.stringify(userSession));
+                sessionStorage.setItem('votazioni_utente_corrente', JSON.stringify(userSession));
+                
+                console.log("Login riuscito, sessione salvata:", userSession);
+                mostraMessaggio(`Accesso riuscito! Benvenuto ${nomeGiocatore}`, "success");
+                
+                // Attendi 1.5 secondi prima di reindirizzare
+                setTimeout(() => {
+                    window.location.href = "votazioni.html";
+                }, 1500);
+                
+            } else {
+                mostraMessaggio(risultato.message, "error");
+            }
+        };
+
+        // Accesso per ospiti
+        window.verificaOspite = async () => {
+            const nomeOspite = document.getElementById('selectOspite').value;
+            
+            if (!nomeOspite) {
+                mostraMessaggio("Seleziona il tuo nome dalla lista", "error");
+                return;
+            }
+            
+            const partecipa = verificaPartecipazionePartita(nomeOspite);
+            
+            if (!partecipa) {
+                mostraSchermataNonPartecipante(nomeOspite);
+                return;
+            }
+            
+            const giaVotato = await haGiaVotato(nomeOspite);
+            if (giaVotato) {
+                mostraSchermataGiaVotato(nomeOspite);
+                return;
+            }
+            
+            // Salva sessione ospite (solo in sessionStorage, non localStorage)
+            const expiry = new Date();
+            expiry.setDate(expiry.getDate() + 1); // 1 giorno per ospiti
+            
+            const userSession = {
+                id: nomeOspite.replace(/\s/g, '_').toLowerCase(),
+                nome: nomeOspite,
+                email: "",
+                telefono: "",
+                isOspite: true,
+                isAdmin: verificaAdmin(nomeOspite),
+                expiry: expiry.toISOString()
+            };
+            
+            // Solo sessionStorage per ospiti, così evitiamo loop
+            sessionStorage.setItem('votazioni_utente_corrente', JSON.stringify(userSession));
+            // NON salviamo in localStorage per ospiti
+            
+            console.log("Accesso ospite riuscito, sessione:", userSession);
+            mostraMessaggio(`Accesso ospite riuscito! Benvenuto ${nomeOspite}`, "success");
+            
+            setTimeout(() => {
+                window.location.href = "votazioni.html";
+            }, 1500);
+        };
+
+        // Schermate
+        function mostraSchermataNonPartecipante(nomeGiocatore) {
+            document.getElementById('loginArea').classList.add('hidden');
+            document.getElementById('nonPartecipanteArea').classList.remove('hidden');
+            
+            document.getElementById('nomeNonPartecipante').textContent = nomeGiocatore;
+            document.getElementById('dataPartita').textContent = 
+                ultimaPartita?.info?.riga2 || "Data non disponibile";
+            document.getElementById('nomePartita').textContent = 
+                ultimaPartita?.info?.riga1 || "Partita";
+            
+            // SALVA PER VISUALIZZAZIONE STATISTICHE
+            const userSession = {
+                id: nomeGiocatore.replace(/\s/g, '_').toLowerCase(),
+                nome: nomeGiocatore,
+                email: "",
+                telefono: "",
+                isAdmin: verificaAdmin(nomeGiocatore),
+                expiry: new Date().toISOString()
+            };
+            sessionStorage.setItem('votazioni_utente_corrente', JSON.stringify(userSession));
+            sessionStorage.setItem('visualizza_statistiche', nomeGiocatore);
+        }
+
+        function mostraSchermataGiaVotato(nomeGiocatore) {
+            document.getElementById('loginArea').classList.add('hidden');
+            document.getElementById('giaVotatoArea').classList.remove('hidden');
+            
+            document.getElementById('nomeGiaVotato').textContent = nomeGiocatore;
+            
+            // SALVA PER VISUALIZZAZIONE STATISTICHE
+            const userSession = {
+                id: nomeGiocatore.replace(/\s/g, '_').toLowerCase(),
+                nome: nomeGiocatore,
+                email: "",
+                telefono: "",
+                isAdmin: verificaAdmin(nomeGiocatore),
+                expiry: new Date().toISOString()
+            };
+            sessionStorage.setItem('votazioni_utente_corrente', JSON.stringify(userSession));
+            sessionStorage.setItem('visualizza_statistiche', nomeGiocatore);
+        }
+
+        function mostraSchermataErrore(messaggio) {
+            document.getElementById('loginArea').classList.add('hidden');
+            document.getElementById('erroreArea').classList.remove('hidden');
+            document.getElementById('messaggioErroreTesto').textContent = messaggio;
+        }
+
+        function mostraMessaggio(testo, tipo = "info") {
+            const colori = { 
+                success: 'bg-emerald-500', 
+                error: 'bg-red-500', 
+                info: 'bg-blue-500',
+                warning: 'bg-orange-500'
+            };
+            
+            const messaggioDiv = document.getElementById('messaggioTemporaneo');
+            messaggioDiv.className = `fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-xl shadow-2xl font-black text-[11px] ${colori[tipo]} animate-fade-in`;
+            messaggioDiv.textContent = testo;
+            messaggioDiv.classList.remove('hidden');
+            
+            setTimeout(() => {
+                messaggioDiv.style.opacity = '0';
+                setTimeout(() => messaggioDiv.classList.add('hidden'), 300);
+            }, 3000);
+        }
+
+        window.tornaAlLogin = () => {
+            localStorage.removeItem('scarpari_voti_user');
+            sessionStorage.removeItem('votazioni_utente_corrente');
+            sessionStorage.removeItem('visualizza_statistiche');
+            sessionStorage.removeItem('scarpari_admin_logged');
+            
+            document.getElementById('nonPartecipanteArea').classList.add('hidden');
+            document.getElementById('giaVotatoArea').classList.add('hidden');
+            document.getElementById('erroreArea').classList.add('hidden');
+            document.getElementById('loginArea').classList.remove('hidden');
+        };
+
+        window.vediStatistiche = () => {
+            // Reindirizza direttamente a votazioni.html in modalità statistiche
+            window.location.href = "votazioni.html";
+        };
+
+        window.logout = () => {
+            localStorage.removeItem('scarpari_voti_user');
+            sessionStorage.removeItem('votazioni_utente_corrente');
+            sessionStorage.removeItem('visualizza_statistiche');
+            sessionStorage.removeItem('scarpari_admin_logged');
+            window.location.reload();
+        };
+
+        document.addEventListener('DOMContentLoaded', caricaDati);
+    </script>
+    <style>
+        .animate-fade-in { animation: fade-in 0.3s ease-out; }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        select {
+            background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+            background-position: right 0.5rem center;
+            background-repeat: no-repeat;
+            background-size: 1.5em 1.5em;
+            padding-right: 2.5rem;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+    </style>
+</head>
+<body class="text-slate-900 min-h-screen flex items-center justify-center p-4">
+    
+    <div id="messaggioTemporaneo" class="hidden z-50"></div>
+
+    <!-- Area Login -->
+    <div id="loginArea" class="w-full max-w-md">
+        <div class="bg-white/95 backdrop-blur-md rounded-3xl p-8 shadow-2xl border border-white/20">
+            <div class="text-center mb-8">
+                <div class="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
+                    <span class="text-white text-2xl font-black italic">EVO</span>
+                </div>
+                <h1 class="font-black italic text-2xl uppercase tracking-tighter mb-2">
+                    Scarpari <span class="text-blue-600">Voti</span>
+                </h1>
+                <p class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">
+                    Sistema di Votazione Partita
+                </p>
+            </div>
+
+            <!-- Info Partita -->
+            <div class="bg-blue-50/50 border border-blue-200 rounded-2xl p-4 mb-6 text-center">
+                <p class="text-[10px] font-black uppercase text-blue-700 mb-1">⚽ Partita in Votazione</p>
+                <p id="nomePartitaLogin" class="text-[13px] font-bold text-blue-900 truncate">Caricamento partita...</p>
+                <p id="dataPartitaLogin" class="text-[10px] text-blue-600 truncate">Caricamento data...</p>
+            </div>
+
+            <!-- Accesso Registrati -->
+            <div class="mb-8">
+                <h3 class="font-black text-[11px] uppercase text-slate-700 mb-4 border-b pb-2">
+                    🔐 Accesso Giocatori Registrati
+                </h3>
+                <div class="space-y-3">
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase ml-2 mb-1 block">Email Registrata</label>
+                        <input type="email" id="inputEmail" 
+                               placeholder="tua@email.com"
+                               class="w-full p-4 bg-slate-100 rounded-2xl font-bold text-sm outline-none border focus:border-blue-500">
+                        <p class="text-[8px] text-slate-400 mt-1 ml-2">Usa l'email con cui ti sei registrato</p>
+                    </div>
+                    <div class="text-center">
+                        <span class="text-[10px] font-black text-slate-400 uppercase bg-white px-3">OPPURE</span>
+                    </div>
+                    <div>
+                        <label class="text-[9px] font-bold text-slate-500 uppercase ml-2 mb-1 block">Telefono Registrato</label>
+                        <input type="tel" id="inputTelefono" 
+                               placeholder="3331234567 (senza +39)"
+                               class="w-full p-4 bg-slate-100 rounded-2xl font-bold text-sm outline-none border focus:border-blue-500">
+                        <p class="text-[8px] text-slate-400 mt-1 ml-2">Senza prefisso internazionale (+39)</p>
+                        <p class="text-[7px] text-slate-300 mt-1 ml-2">Accetta formati: 3331234567, 02 1234567, 333-123-4567</p>
+                    </div>
+                </div>
+                <button onclick="verificaLogin()" 
+                        class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all active:scale-95">
+                    🔓 ACCEDI AL SISTEMA
+                </button>
+            </div>
+
+            <!-- Separatore -->
+            <div class="relative mb-8">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-slate-300"></div>
+                </div>
+                <div class="relative flex justify-center">
+                    <span class="px-4 bg-white text-[10px] font-black uppercase text-slate-500">
+                        Accesso Ospiti
+                    </span>
+                </div>
+            </div>
+
+            <!-- Accesso Ospiti -->
+            <div class="mb-6">
+                <h3 class="font-black text-[11px] uppercase text-slate-700 mb-4 border-b pb-2">
+                    🎯 Sei un Ospite?
+                </h3>
+                <div>
+                    <label class="text-[9px] font-bold text-slate-500 uppercase ml-2 mb-1 block">
+                        Seleziona il tuo nome dalla partita
+                    </label>
+                    <select id="selectOspite" 
+                            class="w-full p-4 bg-slate-100 rounded-2xl font-bold text-sm outline-none border focus:border-blue-500 appearance-none">
+                        <option value="">Caricamento lista partecipanti...</option>
+                    </select>
+                    <p class="text-[8px] text-slate-400 mt-1 ml-2">
+                        Solo per partecipanti senza email/telefono registrati
+                    </p>
+                </div>
+                <button onclick="verificaOspite()" 
+                        class="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all active:scale-95">
+                    🎯 ACCEDI COME OSPITE
+                </button>
+            </div>
+
+            <!-- Info Sistema -->
+            <div class="mt-8 pt-6 border-t border-slate-200">
+                <div class="grid grid-cols-2 gap-3 text-center">
+                    <div class="bg-slate-50 p-2 rounded-lg">
+                        <p class="text-[8px] font-black text-slate-700 uppercase">⏰ Timer</p>
+                        <p class="text-[7px] text-slate-500">48 ore per votare</p>
+                    </div>
+                    <div class="bg-slate-50 p-2 rounded-lg">
+                        <p class="text-[8px] font-black text-slate-700 uppercase">🔒 Sicuro</p>
+                        <p class="text-[7px] text-slate-500">1 voto per giocatore</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schermata Non Partecipante -->
+    <div id="nonPartecipanteArea" class="hidden w-full max-w-md">
+        <div class="bg-white/95 backdrop-blur-md rounded-3xl p-8 shadow-2xl border border-white/20">
+            <div class="text-center mb-6">
+                <div class="w-20 h-20 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span class="text-3xl">🏆</span>
+                </div>
+                <h2 class="font-black italic text-2xl uppercase text-blue-900 mb-2">
+                    Ciao <span id="nomeNonPartecipante" class="text-blue-600"></span>!
+                </h2>
+                <p class="text-[11px] font-bold text-slate-600">
+                    Grazie per essere parte degli Scarpari Evo
+                </p>
+            </div>
+
+            <div class="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 mb-6 text-center">
+                <p class="text-[10px] font-black uppercase text-yellow-800 mb-2">ℹ️ Informazioni Partita</p>
+                <p id="nomePartita" class="text-[13px] font-bold text-yellow-900 mb-1">Partita</p>
+                <p class="text-[9px] text-yellow-700">Data: <span id="dataPartita">Data non disponibile</span></p>
+            </div>
+
+            <div class="bg-slate-50 rounded-2xl p-4 mb-6">
+                <p class="text-[11px] font-bold text-slate-800 mb-3 text-center">
+                    Non hai partecipato all'ultima partita
+                </p>
+                <div class="space-y-2 text-[10px] text-slate-600">
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Il sistema di votazione è riservato ai <strong>partecipanti</strong></span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Puoi consultare le tue <strong>statistiche personali</strong></span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Ti aspettiamo alla prossima partita! ⚽</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <button onclick="vediStatistiche()" 
+                        class="w-full bg-purple-600 hover:bg-purple-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all">
+                    📊 VEDI LE MIE STATISTICHE
+                </button>
+                <button onclick="tornaAlLogin()" 
+                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black py-4 rounded-2xl text-[12px] uppercase shadow transition-all">
+                    ↩️ TORNA AL LOGIN
+                </button>
+                <button onclick="logout()" 
+                        class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-black py-3 rounded-xl text-[10px] uppercase">
+                    🚪 LOGOUT
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schermata Già Votato -->
+    <div id="giaVotatoArea" class="hidden w-full max-w-md">
+        <div class="bg-white/95 backdrop-blur-md rounded-3xl p-8 shadow-2xl border border-white/20">
+            <div class="text-center mb-6">
+                <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span class="text-3xl">✅</span>
+                </div>
+                <h2 class="font-black italic text-2xl uppercase text-emerald-900 mb-2">
+                    Ciao <span id="nomeGiaVotato" class="text-emerald-600"></span>!
+                </h2>
+                <p class="text-[11px] font-bold text-slate-600">
+                    Il tuo contributo è già stato registrato
+                </p>
+            </div>
+
+            <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 mb-6 text-center">
+                <p class="text-[10px] font-black uppercase text-emerald-800 mb-2">🎯 Voto Registrato</p>
+                <p class="text-[13px] font-bold text-emerald-900">
+                    Hai già espresso i tuoi voti per questa partita
+                </p>
+                <p class="text-[9px] text-emerald-700 mt-2">
+                    Ogni giocatore può votare una sola volta
+                </p>
+            </div>
+
+            <div class="bg-slate-50 rounded-2xl p-4 mb-6">
+                <p class="text-[11px] font-bold text-slate-800 mb-3 text-center">
+                    Cosa puoi fare ora:
+                </p>
+                <div class="space-y-2 text-[10px] text-slate-600">
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Consulta le tue <strong>statistiche aggiornate</strong></span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Segui l'evoluzione del tuo <strong>voto base</strong></span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                        <span class="text-blue-500">✓</span>
+                        <span>Monitora i tuoi <strong>punti community</strong></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-3">
+                <button onclick="vediStatistiche()" 
+                        class="w-full bg-purple-600 hover:bg-purple-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all">
+                    📊 VEDI LE MIE STATISTICHE
+                </button>
+                <button onclick="tornaAlLogin()" 
+                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black py-4 rounded-2xl text-[12px] uppercase shadow transition-all">
+                    ↩️ TORNA AL LOGIN
+                </button>
+                <button onclick="logout()" 
+                        class="w-full bg-red-100 hover:bg-red-200 text-red-700 font-black py-3 rounded-xl text-[10px] uppercase">
+                    🚪 LOGOUT
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schermata Errore -->
+    <div id="erroreArea" class="hidden w-full max-w-md">
+        <div class="bg-white/95 backdrop-blur-md rounded-3xl p-8 shadow-2xl border border-white/20">
+            <div class="text-center mb-6">
+                <div class="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <span class="text-3xl">⚠️</span>
+                </div>
+                <h2 class="font-black italic text-2xl uppercase text-red-900 mb-2">
+                    Errore di Sistema
+                </h2>
+                <p id="messaggioErroreTesto" class="text-[11px] font-bold text-slate-600">
+                    Errore di connessione
+                </p>
+            </div>
+
+            <div class="space-y-3">
+                <button onclick="window.location.reload()" 
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl text-[12px] uppercase shadow-lg transition-all">
+                    🔄 RICARICA LA PAGINA
+                </button>
+                <button onclick="tornaAlLogin()" 
+                        class="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 font-black py-4 rounded-2xl text-[12px] uppercase shadow transition-all">
+                    ↩️ TORNA AL LOGIN
+                </button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>
